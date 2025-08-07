@@ -61,6 +61,8 @@ contract AuraEngine is ReentrancyGuard {
     error AuraEngine__MintingFailed();
     error AuraEngine__HealthFactorBroken();
     error AuraEngine__CollateralNotRedeemed();
+    error AuraEngine__HealthFactorAlreadyGood();
+    error DSCEngine__HealthFactorNotImproved();
 
     /*///////////////////////////////////////
                     TYPES
@@ -81,6 +83,8 @@ contract AuraEngine is ReentrancyGuard {
     uint8 constant THRESHOLD_HEALTH_FACTOR = 2;
     uint256 constant PRECISION_FACTOR = 1e18;
     uint256 constant PRECISION_PRICE_FEED = 1e10;
+    uint256 constant LIQUIDATION_BONUS = 10;
+    uint256 constant LIQUIDATION_PRECISION = 100;
 
     /*///////////////////////////////////////
                      EVENTS
@@ -157,7 +161,34 @@ contract AuraEngine is ReentrancyGuard {
         // _revertIfHealthFactorIsBroken(msg.sender);
     }
 
-    function liquidate() public {}
+    /**
+     * @param _userToLiquidate The user which is getting liquidated
+     * @param _debtToCover Amount of debt liquidator wants to cover
+     */
+    function liquidate(address _userToLiquidate, uint256 _debtToCover)
+        external
+        collateralMustBeMoreThanZero(_debtToCover)
+        nonReentrant
+    {
+        uint256 startingHealthFactor = getHealthFactor(_userToLiquidate);
+        if (startingHealthFactor > THRESHOLD_HEALTH_FACTOR * PRECISION_FACTOR) {
+            revert AuraEngine__HealthFactorAlreadyGood();
+        }
+
+        uint256 amountToClaimFromDebt = getETHforINR(_debtToCover);
+
+        uint256 bonusCollateral = (amountToClaimFromDebt * LIQUIDATION_BONUS / LIQUIDATION_PRECISION);
+        uint256 totalCollateralToReedeem = amountToClaimFromDebt + bonusCollateral;
+        _redeemCollateral(_userToLiquidate, msg.sender, totalCollateralToReedeem);
+        _burnAura(_userToLiquidate, msg.sender, _debtToCover);
+
+        uint256 endingUserHealthFactor = getHealthFactor(_userToLiquidate);
+        if (endingUserHealthFactor <= startingHealthFactor) {
+            revert DSCEngine__HealthFactorNotImproved();
+        }
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
+
     function checkUpkeep() external {}
     function performUpKeep() external {}
 
@@ -276,6 +307,18 @@ contract AuraEngine is ReentrancyGuard {
         uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED;
         uint256 finalValue = adjustedPrice * _amountInEth / PRECISION_FACTOR;
         return finalValue;
+    }
+
+    /**
+     * @param _amountInINR Amount in INR to convert in ETH
+     * @return uint256 if _amountInEth = 2000INR and price of 1 eth in INR is 1000INR, then this returns 2 ether
+     */
+    function getETHforINR(uint256 _amountInINR) public view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(getEthInrPriceFeed());
+        (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
+        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED;
+        uint256 finalPrice = _amountInINR * PRECISION_PRICE_FEED / adjustedPrice;
+        return finalPrice;
     }
 
     /**
