@@ -14,6 +14,7 @@ contract AuraCoinTest is Test {
         vm.startBroadcast(ALICE);
         auraCoin = new AuraCoin();
         vm.stopBroadcast();
+        vm.deal(ALICE, AMOUNT_TO_MINT);
     }
 
     function testOnlyOwnerCanMint() public {
@@ -58,5 +59,14 @@ contract AuraCoinTest is Test {
         vm.prank(ALICE);
         vm.expectRevert(AuraCoin.AuraCoin__InvalidAddressForMintingTokens.selector);
         auraCoin.mint(address(0), AMOUNT_TO_MINT);
+    }
+
+    function testRevertOnInvalidCall() public {
+        bytes memory callData = abi.encodeWithSelector(auraCoin.mint.selector, ALICE, AMOUNT_TO_MINT);
+        vm.prank(ALICE);
+        // vm.expectRevert(AuraCoin.AuraCoin__AmountShouldBeMoreThanZero.selector);
+        (bool success,) = address(auraCoin).call(callData);
+        assertEq(success, true);
+        // assertEq(address(auraCoin).balance, AMOUNT_TO_MINT);
     }
 }

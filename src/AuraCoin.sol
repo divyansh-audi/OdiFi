@@ -27,7 +27,7 @@ import {ERC20, ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensio
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
- * @dev This will going to represent a STABLE COIN whose price will be pegged to `₹1` (i.e. 1 Indian Rupee) and it will be governed by AuraEngine
+ * @dev This will going to represent a STABLE COIN whose price will be pegged to `₹1` (i.e. 1 Indian Rupee) and it will be governed by AuraEngine.
  * @title AuraCoin
  * @author Divyansh Audichya
  * This Contract is an ERC-20 token which has burn and mint function. It is ownable and can only be controlled by the Engine contract.
