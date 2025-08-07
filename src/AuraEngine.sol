@@ -60,6 +60,7 @@ contract AuraEngine is ReentrancyGuard {
     error AuraEngine__CollateralNotDeposited();
     error AuraEngine__MintingFailed();
     error AuraEngine__HealthFactorBroken();
+    error AuraEngine__CollateralNotRedeemed();
 
     /*///////////////////////////////////////
                     TYPES
@@ -85,7 +86,8 @@ contract AuraEngine is ReentrancyGuard {
                      EVENTS
     ///////////////////////////////////////*/
 
-    event CollateralDeposited(address indexed sender, uint256 indexed amountDepositedAsCollateral);
+    event CollateralDeposited(address indexed from, uint256 indexed amountDepositedAsCollateral);
+    event CollateralReedemed(address indexed user, address indexed to, uint256 indexed amountRedeemedAsCollateral);
 
     /*///////////////////////////////////////
                    MODIFIER
@@ -125,7 +127,36 @@ contract AuraEngine is ReentrancyGuard {
         _mintAuraCoin(_amountAuraToMint);
     }
 
-    function redeemCollateralAndBurnAura() public {}
+    /**
+     * @dev This function is calling the public functions burnAura and redeemCollateral
+     */
+    function redeemCollateralAndBurnAura(uint256 _amountOfCollateralToRedeem, uint256 _amountAuraToBurn) public {
+        burnAura(_amountAuraToBurn);
+        redeemCollateral(_amountOfCollateralToRedeem);
+    }
+
+    /**
+     * @dev This functions redeems collatercal and check for the health factor after that
+     * @param _amountOfCollateralToRedeem Amount of collateral which the msg.sender wants to redeem
+     */
+    function redeemCollateral(uint256 _amountOfCollateralToRedeem)
+        public
+        nonReentrant
+        collateralMustBeMoreThanZero(_amountOfCollateralToRedeem)
+    {
+        _redeemCollateral(msg.sender, msg.sender, _amountOfCollateralToRedeem);
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
+
+    /**
+     * @dev This call the internal burnAura function and then checks the health Factor which would never gonna hit ..
+     * @param _amountAuraToBurn Amount of AuraToken to be burn and then you can claim collateral
+     */
+    function burnAura(uint256 _amountAuraToBurn) public collateralMustBeMoreThanZero(_amountAuraToBurn) {
+        _burnAura(msg.sender, msg.sender, _amountAuraToBurn);
+        // _revertIfHealthFactorIsBroken(msg.sender);
+    }
+
     function liquidate() public {}
     function checkUpkeep() external {}
     function performUpKeep() external {}
@@ -133,6 +164,38 @@ contract AuraEngine is ReentrancyGuard {
     /*///////////////////////////////////////
               INTERNAL FUNCTIONS
     ///////////////////////////////////////*/
+
+    /**
+     * @dev This function is doing the low level calls and is compatible if someone else want to liquaidate a user
+     *
+     * @param _from The guy who has submitted the collateral
+     * @param _to address which wants claim the collateral
+     * @param _amountOfCollateralToRedeem amount of collateral to redeem
+     */
+    function _redeemCollateral(address _from, address _to, uint256 _amountOfCollateralToRedeem) internal {
+        s_userToCollateralDepositedInEth[_from] -= _amountOfCollateralToRedeem;
+        emit CollateralReedemed(_from, _to, _amountOfCollateralToRedeem);
+        bool success = IERC20(i_wethAddress).transfer(_to, _amountOfCollateralToRedeem);
+        if (!success) {
+            revert AuraEngine__CollateralNotRedeemed();
+        }
+    }
+
+    /**
+     * @dev This contract is first sending AuraToken to this contract and then this contract will call the burn function and it is also compatible if someone wants to liquidate a user.
+     * @param inPlaceOf address who deposited the collateral before
+     * @param by address which is burning the AuraTokens
+     * @param _amountAuraToBurn amount of AuraTokens to burn
+     */
+    function _burnAura(address inPlaceOf, address by, uint256 _amountAuraToBurn) internal {
+        s_userToAuraCoinMinted[inPlaceOf] -= _amountAuraToBurn;
+        bool success = i_auraCoin.transferFrom(by, address(this), _amountAuraToBurn);
+        if (!success) {
+            revert AuraEngine__CollateralNotRedeemed();
+        }
+        i_auraCoin.burn(_amountAuraToBurn);
+    }
+
     /**
      * This function will deposit collateral to this AuraEngine contract .
      * @param _amountInEth Amount of collateral in ETH
@@ -200,6 +263,9 @@ contract AuraEngine is ReentrancyGuard {
         return healthFactor;
     }
 
+    /*///////////////////////////////////////
+              GETTER FUNCTIONS
+    ///////////////////////////////////////*/
     /**
      * @param _amountInEth Amount in ETH to convert in INR
      * @return uint256 if _amountInEth = 2 ether and price of 1 eth in INR is 1000INR, then this returns 2000*1e18;
@@ -212,9 +278,6 @@ contract AuraEngine is ReentrancyGuard {
         return finalValue;
     }
 
-    /*///////////////////////////////////////
-              GETTER FUNCTIONS
-    ///////////////////////////////////////*/
     /**
      * @return address Address of the AuraCoin Contract
      */
