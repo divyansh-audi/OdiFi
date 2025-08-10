@@ -80,12 +80,13 @@ contract AuraEngine is ReentrancyGuard, Ownable {
 
     AuraCoin private immutable i_auraCoin;
     address private immutable i_wethAddress;
-    address private immutable i_ethINRPriceFeed;
+    address private immutable i_ethUSDPriceFeed;
     address private immutable i_timeLockContract;
 
     mapping(address user => uint256 amountDepositedInEth) s_userToCollateralDepositedInEth;
     mapping(address user => uint256 tokensMinted) s_userToAuraCoinMinted;
 
+    uint8 private constant USD_INR_PRICE = 85; // because of unavailability of inr priice feeds directly ,this will be usd *85--> almost equivalent to INR
     uint8 private THRESHOLD_HEALTH_FACTOR = 20;
     uint8 private constant THRESHOLD_HEALTH_FACTOR_PRECISION = 10;
     uint256 private constant PRECISION_FACTOR = 1e18;
@@ -114,12 +115,12 @@ contract AuraEngine is ReentrancyGuard, Ownable {
                    FUNCTIONS
     ///////////////////////////////////////*/
 
-    constructor(AuraCoin auraCoin, address weth, address ethINRPriceFeed, address timeLockContractAddress)
+    constructor(AuraCoin auraCoin, address weth, address ethUSDPriceFeed, address timeLockContractAddress)
         Ownable(timeLockContractAddress)
     {
         i_auraCoin = auraCoin;
         i_wethAddress = weth;
-        i_ethINRPriceFeed = ethINRPriceFeed;
+        i_ethUSDPriceFeed = ethUSDPriceFeed;
         i_timeLockContract = timeLockContractAddress;
     }
 
@@ -312,9 +313,9 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @return uint256 if _amountInEth = 2 ether and price of 1 eth in INR is 1000INR, then this returns 2000*1e18;
      */
     function getINRforEth(uint256 _amountInEth) public view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(getEthInrPriceFeed());
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(getEthUsdPriceFeed());
         (, int256 price,,,) = priceFeed.staleCheckLatestRoundData(); // this return value in 8 decimal places ,we need to add 10 more
-        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED;
+        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE; // this will give inr price in ether format
         uint256 finalValue = adjustedPrice * _amountInEth / PRECISION_FACTOR;
         return finalValue;
     }
@@ -324,10 +325,10 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @return uint256 if _amountInEth = 2000INR and price of 1 eth in INR is 1000INR, then this returns 2 ether
      */
     function getETHforINR(uint256 _amountInINR) public view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(getEthInrPriceFeed());
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(getEthUsdPriceFeed());
         (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
-        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED;
-        uint256 finalPrice = _amountInINR * PRECISION_PRICE_FEED / adjustedPrice;
+        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE; // this will give INR
+        uint256 finalPrice = _amountInINR * PRECISION_PRICE_FEED / (adjustedPrice);
         return finalPrice;
     }
 
@@ -346,10 +347,10 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     }
 
     /**
-     * @return address Address for ETH/INR price feed.
+     * @return address Address for ETH/USD price feed.
      */
-    function getEthInrPriceFeed() public view returns (address) {
-        return i_ethINRPriceFeed;
+    function getEthUsdPriceFeed() public view returns (address) {
+        return i_ethUSDPriceFeed;
     }
 
     /**
