@@ -31,7 +31,8 @@ contract HelperConfig is Script {
     }
 
     function getConfig() public returns (NetworkConfig memory) {
-        return getConfigByChainId(block.chainid);
+        activeNetworkConfig = getConfigByChainId(block.chainid);
+        return activeNetworkConfig;
     }
 
     function getConfigByChainId(uint256 chainId) public returns (NetworkConfig memory) {
@@ -50,6 +51,7 @@ contract HelperConfig is Script {
             ethUSDPriceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
             defaultOwner: DEFAULT_WALLET
         });
+
         return sepoliaConfig;
     }
 
@@ -61,6 +63,7 @@ contract HelperConfig is Script {
         MockV3Aggregator ethUsdPriceFeed = new MockV3Aggregator(DECIMALS, ETH_USD_PRICE);
         ERC20Mock weth = new ERC20Mock();
         vm.stopBroadcast();
+
         return
             NetworkConfig({weth: address(weth), ethUSDPriceFeed: address(ethUsdPriceFeed), defaultOwner: ANVIL_WALLET});
     }
