@@ -29,6 +29,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {AggregatorV3Interface} from "@chainlink-brownie/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {console2} from "forge-std/console2.sol";
 // import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 /**
@@ -81,7 +82,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     AuraCoin private immutable i_auraCoin;
     address private immutable i_wethAddress;
     address private immutable i_ethUSDPriceFeed;
-    // address private immutable i_timeLockContract;
+    address private immutable i_timeLockContract;
 
     mapping(address user => uint256 amountDepositedInEth) s_userToCollateralDepositedInEth;
     mapping(address user => uint256 tokensMinted) s_userToAuraCoinMinted;
@@ -314,6 +315,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(getEthUsdPriceFeed());
         (, int256 price,,,) = priceFeed.staleCheckLatestRoundData(); // this return value in 8 decimal places ,we need to add 10 more
         uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE; // this will give inr price in ether format
+        console2.log("adjusted price:", adjustedPrice);
         uint256 finalValue = adjustedPrice * _amountInEth / PRECISION_FACTOR;
         return finalValue;
     }
@@ -326,7 +328,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(getEthUsdPriceFeed());
         (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
         uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE; // this will give INR
-        uint256 finalPrice = _amountInINR * PRECISION_PRICE_FEED / (adjustedPrice);
+        uint256 finalPrice = _amountInINR * PRECISION_FACTOR / (adjustedPrice);
         return finalPrice;
     }
 
@@ -370,9 +372,9 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     /**
      * @return address Address of the TimeLock Contract
      */
-    // function getTimeLockContract() public view returns (address) {
-    //     return i_timeLockContract;
-    // }
+    function getTimeLockContract() public view returns (address) {
+        return i_timeLockContract;
+    }
 
     /*///////////////////////////////////////
               OWNER FUNCTIONS
