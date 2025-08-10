@@ -82,7 +82,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     AuraCoin private immutable i_auraCoin;
     address private immutable i_wethAddress;
     address private immutable i_ethUSDPriceFeed;
-    address private immutable i_timeLockContract;
+    // address private immutable i_timeLockContract;
 
     mapping(address user => uint256 amountDepositedInEth) s_userToCollateralDepositedInEth;
     mapping(address user => uint256 tokensMinted) s_userToAuraCoinMinted;
@@ -92,8 +92,8 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     uint8 private constant THRESHOLD_HEALTH_FACTOR_PRECISION = 10;
     uint256 private constant PRECISION_FACTOR = 1e18;
     uint256 private constant PRECISION_PRICE_FEED = 1e10;
-    uint256 private LIQUIDATION_BONUS = 10;
-    uint256 private constant LIQUIDATION_PRECISION = 100;
+    uint256 private LIQUIDATION_BONUS = 10e18;
+    uint256 private constant LIQUIDATION_PRECISION = 100e18;
     uint256 private constant MIN_HEALTH_FACTOR = 1e18;
 
     /*///////////////////////////////////////
@@ -106,7 +106,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     /*///////////////////////////////////////
                    MODIFIER
     ///////////////////////////////////////*/
-    modifier collateralMustBeMoreThanZero(uint256 amount) {
+    modifier mustBeMoreThanZero(uint256 amount) {
         if (amount <= 0) {
             revert AuraEngine__MustBeMoreThanZero();
         }
@@ -157,7 +157,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     function redeemCollateral(uint256 _amountOfCollateralToRedeem)
         public
         nonReentrant
-        collateralMustBeMoreThanZero(_amountOfCollateralToRedeem)
+        mustBeMoreThanZero(_amountOfCollateralToRedeem)
     {
         _redeemCollateral(msg.sender, msg.sender, _amountOfCollateralToRedeem);
         _revertIfHealthFactorIsBroken(msg.sender);
@@ -167,7 +167,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @dev This call the internal burnAura function and then checks the health Factor which would never gonna hit ..
      * @param _amountAuraToBurn Amount of AuraToken to be burn and then you can claim collateral
      */
-    function burnAura(uint256 _amountAuraToBurn) public collateralMustBeMoreThanZero(_amountAuraToBurn) {
+    function burnAura(uint256 _amountAuraToBurn) public mustBeMoreThanZero(_amountAuraToBurn) {
         _burnAura(msg.sender, msg.sender, _amountAuraToBurn);
         // _revertIfHealthFactorIsBroken(msg.sender);
     }
@@ -178,11 +178,11 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      */
     function liquidate(address _userToLiquidate, uint256 _debtToCover)
         external
-        collateralMustBeMoreThanZero(_debtToCover)
+        mustBeMoreThanZero(_debtToCover)
         nonReentrant
     {
         uint256 startingHealthFactor = getHealthFactorByUserAddressInProtocol(_userToLiquidate);
-        if (startingHealthFactor > (THRESHOLD_HEALTH_FACTOR * PRECISION_FACTOR) / THRESHOLD_HEALTH_FACTOR_PRECISION) {
+        if (startingHealthFactor > MIN_HEALTH_FACTOR) {
             revert AuraEngine__HealthFactorAlreadyGood();
         }
 
@@ -243,11 +243,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @param _amountInEth Amount of collateral in ETH
      * @notice In this function the state is first updated to ensure safety and re-entrency safety .
      */
-    function _depositCollateral(uint256 _amountInEth)
-        internal
-        collateralMustBeMoreThanZero(_amountInEth)
-        nonReentrant
-    {
+    function _depositCollateral(uint256 _amountInEth) internal mustBeMoreThanZero(_amountInEth) nonReentrant {
         s_userToCollateralDepositedInEth[msg.sender] = _amountInEth;
         emit CollateralDeposited(msg.sender, _amountInEth);
         bool success = IERC20(i_wethAddress).transferFrom(msg.sender, address(this), _amountInEth);
@@ -261,11 +257,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @param _amountAuraToMint Amount of Aura to mint after depositing collateral
      * @notice In this function the state is first updated to ensure safety and re-entrency safety .
      */
-    function _mintAuraCoin(uint256 _amountAuraToMint)
-        internal
-        collateralMustBeMoreThanZero(_amountAuraToMint)
-        nonReentrant
-    {
+    function _mintAuraCoin(uint256 _amountAuraToMint) internal mustBeMoreThanZero(_amountAuraToMint) nonReentrant {
         s_userToAuraCoinMinted[msg.sender] += _amountAuraToMint;
         _revertIfHealthFactorIsBroken(msg.sender);
         bool success = i_auraCoin.mint(msg.sender, _amountAuraToMint);
@@ -307,6 +299,11 @@ contract AuraEngine is ReentrancyGuard, Ownable {
         return healthFactor;
     }
 
+    /**
+     * @notice anyone can check the health factor using this function
+     * @param _collateralDeposited amount of collateral in eth deposited
+     * @param _auraMinted amount of Aura minted (if 1000 rupee -> represent it as 1000 ether)
+     */
     function getHealthFactor(uint256 _collateralDeposited, uint256 _auraMinted) public view returns (uint256) {
         uint256 collateralValueInINR = getINRforEth(_collateralDeposited);
         uint256 healthFactor = (collateralValueInINR * PRECISION_FACTOR * THRESHOLD_HEALTH_FACTOR_PRECISION)
@@ -379,8 +376,12 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     /**
      * @return address Address of the TimeLock Contract
      */
-    function getTimeLockContract() public view returns (address) {
-        return i_timeLockContract;
+    // function getTimeLockContract() public view returns (address) {
+    //     return i_timeLockContract;
+    // }
+
+    function getThresholdHealthFactor() public view returns (uint8) {
+        return THRESHOLD_HEALTH_FACTOR;
     }
 
     /*///////////////////////////////////////
@@ -402,7 +403,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @notice If you want to provide an overcollateralization value of for example-> 1.5 then provide 15 in the parameter as solidity don't have integer so make sure multiplying the answer with 10
      * @param _newOvercollateralizedPercent The new percentage for over-collaterlaization decided by the community
      */
-    function updateTheLiquidationThreshold(uint8 _newOvercollateralizedPercent) internal onlyOwner {
+    function updateTheLiquidationThreshold(uint8 _newOvercollateralizedPercent) external onlyOwner {
         if (_newOvercollateralizedPercent < 12 || _newOvercollateralizedPercent > type(uint8).max) {
             revert AuraEngine__OverCollateralizationNotValid();
         }
