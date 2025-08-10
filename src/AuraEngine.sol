@@ -94,6 +94,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     uint256 private constant PRECISION_PRICE_FEED = 1e10;
     uint256 private LIQUIDATION_BONUS = 10;
     uint256 private constant LIQUIDATION_PRECISION = 100;
+    uint256 private constant MIN_HEALTH_FACTOR = 1e18;
 
     /*///////////////////////////////////////
                      EVENTS
@@ -180,7 +181,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
         collateralMustBeMoreThanZero(_debtToCover)
         nonReentrant
     {
-        uint256 startingHealthFactor = getHealthFactor(_userToLiquidate);
+        uint256 startingHealthFactor = getHealthFactorByUserAddressInProtocol(_userToLiquidate);
         if (startingHealthFactor > (THRESHOLD_HEALTH_FACTOR * PRECISION_FACTOR) / THRESHOLD_HEALTH_FACTOR_PRECISION) {
             revert AuraEngine__HealthFactorAlreadyGood();
         }
@@ -192,7 +193,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
         _redeemCollateral(_userToLiquidate, msg.sender, totalCollateralToReedeem);
         _burnAura(_userToLiquidate, msg.sender, _debtToCover);
 
-        uint256 endingUserHealthFactor = getHealthFactor(_userToLiquidate);
+        uint256 endingUserHealthFactor = getHealthFactorByUserAddressInProtocol(_userToLiquidate);
         if (endingUserHealthFactor <= startingHealthFactor) {
             revert DSCEngine__HealthFactorNotImproved();
         }
@@ -277,11 +278,14 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @dev THRESHOLD_HEALTH_FACTOR is uint8 and when multiplied by uint256 returns uint256.
      */
     function _revertIfHealthFactorIsBroken(address _user) internal view {
-        uint256 healthFactor = getHealthFactor(_user);
-        if (healthFactor < (THRESHOLD_HEALTH_FACTOR * PRECISION_FACTOR) / THRESHOLD_HEALTH_FACTOR_PRECISION) {
+        uint256 healthFactor = getHealthFactorByUserAddressInProtocol(_user);
+        if (healthFactor < MIN_HEALTH_FACTOR) {
             revert AuraEngine__HealthFactorBroken();
         }
     }
+    /*///////////////////////////////////////
+              GETTER FUNCTIONS
+    ///////////////////////////////////////*/
 
     /**
      * @dev This one is bit tricky:
@@ -295,18 +299,21 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @param _user User for which the health factor is being checked.
      * @return uint256 it returns 4 * 1e18 in case of above example.
      */
-    function getHealthFactor(address _user) public view returns (uint256) {
+    function getHealthFactorByUserAddressInProtocol(address _user) public view returns (uint256) {
         uint256 collateralDepositedInEth = getCollateralDepositedByUsers(_user);
         uint256 amountOfAuraCoinMintedInINR = getAuraCoinMintedByUsers(_user);
-        uint256 collateralDepositedInINR = getINRforEth(collateralDepositedInEth);
 
-        uint256 healthFactor = collateralDepositedInINR * PRECISION_FACTOR / amountOfAuraCoinMintedInINR;
+        uint256 healthFactor = getHealthFactor(collateralDepositedInEth, amountOfAuraCoinMintedInINR);
         return healthFactor;
     }
 
-    /*///////////////////////////////////////
-              GETTER FUNCTIONS
-    ///////////////////////////////////////*/
+    function getHealthFactor(uint256 _collateralDeposited, uint256 _auraMinted) public view returns (uint256) {
+        uint256 collateralValueInINR = getINRforEth(_collateralDeposited);
+        uint256 healthFactor = (collateralValueInINR * PRECISION_FACTOR * THRESHOLD_HEALTH_FACTOR_PRECISION)
+            / (_auraMinted * THRESHOLD_HEALTH_FACTOR);
+        return healthFactor;
+    }
+
     /**
      * @param _amountInEth Amount in ETH to convert in INR
      * @return uint256 if _amountInEth = 2 ether and price of 1 eth in INR is 1000INR, then this returns 2000*1e18;
