@@ -81,7 +81,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     AuraCoin private immutable i_auraCoin;
     address private immutable i_wethAddress;
     address private immutable i_ethUSDPriceFeed;
-    address private immutable i_timeLockContract;
+    // address private immutable i_timeLockContract;
 
     mapping(address user => uint256 amountDepositedInEth) s_userToCollateralDepositedInEth;
     mapping(address user => uint256 tokensMinted) s_userToAuraCoinMinted;
@@ -115,13 +115,11 @@ contract AuraEngine is ReentrancyGuard, Ownable {
                    FUNCTIONS
     ///////////////////////////////////////*/
 
-    constructor(AuraCoin auraCoin, address weth, address ethUSDPriceFeed, address timeLockContractAddress)
-        Ownable(timeLockContractAddress)
-    {
+    constructor(AuraCoin auraCoin, address weth, address ethUSDPriceFeed, address owner) Ownable(owner) {
         i_auraCoin = auraCoin;
         i_wethAddress = weth;
         i_ethUSDPriceFeed = ethUSDPriceFeed;
-        i_timeLockContract = timeLockContractAddress;
+        // i_timeLockContract = timeLockContractAddress;
     }
 
     receive() external payable {}
@@ -372,9 +370,9 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     /**
      * @return address Address of the TimeLock Contract
      */
-    function getTimeLockContract() public view returns (address) {
-        return i_timeLockContract;
-    }
+    // function getTimeLockContract() public view returns (address) {
+    //     return i_timeLockContract;
+    // }
 
     /*///////////////////////////////////////
               OWNER FUNCTIONS
