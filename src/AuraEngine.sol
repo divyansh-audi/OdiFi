@@ -28,6 +28,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AggregatorV3Interface} from "@chainlink-brownie/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 // import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 /**
@@ -50,8 +51,10 @@ import {OracleLib} from "./libraries/OracleLib.sol";
  * The system should always be `over collateralized`
  *
  * @notice This is the core contract for the AuraCoin Contract and is responsible for all kind of collateral deposits, minting and Burning of tokens .
+ *
+ * @notice There are some onlyOwner functions which is for governance purpose and the community can propose for the changes ,basically someone will propose a change ,voting will happen and then Governor will tell the Timelock contract to change that thing in this contract ,so after deploying ,the ownership of this should be sent to TimeLock Contract.
  */
-contract AuraEngine is ReentrancyGuard {
+contract AuraEngine is ReentrancyGuard, Ownable {
     /*///////////////////////////////////////
                    ERRORS
     ///////////////////////////////////////*/
@@ -63,6 +66,8 @@ contract AuraEngine is ReentrancyGuard {
     error AuraEngine__CollateralNotRedeemed();
     error AuraEngine__HealthFactorAlreadyGood();
     error DSCEngine__HealthFactorNotImproved();
+    error AuraEngine__ProtocolWillBreakIfBonusIsTooMuch();
+    error AuraEngine__OverCollateralizationNotValid();
 
     /*///////////////////////////////////////
                     TYPES
@@ -73,18 +78,20 @@ contract AuraEngine is ReentrancyGuard {
                 STATE VARIABLES
     ///////////////////////////////////////*/
 
-    AuraCoin immutable i_auraCoin;
-    address immutable i_wethAddress;
-    address immutable i_ethINRPriceFeed;
+    AuraCoin private immutable i_auraCoin;
+    address private immutable i_wethAddress;
+    address private immutable i_ethINRPriceFeed;
+    address private immutable i_timeLockContract;
 
     mapping(address user => uint256 amountDepositedInEth) s_userToCollateralDepositedInEth;
     mapping(address user => uint256 tokensMinted) s_userToAuraCoinMinted;
 
-    uint8 constant THRESHOLD_HEALTH_FACTOR = 2;
-    uint256 constant PRECISION_FACTOR = 1e18;
-    uint256 constant PRECISION_PRICE_FEED = 1e10;
-    uint256 constant LIQUIDATION_BONUS = 10;
-    uint256 constant LIQUIDATION_PRECISION = 100;
+    uint8 private THRESHOLD_HEALTH_FACTOR = 20;
+    uint8 private constant THRESHOLD_HEALTH_FACTOR_PRECISION = 10;
+    uint256 private constant PRECISION_FACTOR = 1e18;
+    uint256 private constant PRECISION_PRICE_FEED = 1e10;
+    uint256 private LIQUIDATION_BONUS = 10;
+    uint256 private constant LIQUIDATION_PRECISION = 100;
 
     /*///////////////////////////////////////
                      EVENTS
@@ -107,10 +114,13 @@ contract AuraEngine is ReentrancyGuard {
                    FUNCTIONS
     ///////////////////////////////////////*/
 
-    constructor(AuraCoin auraCoin, address weth, address ethINRPriceFeed) {
+    constructor(AuraCoin auraCoin, address weth, address ethINRPriceFeed, address timeLockContractAddress)
+        Ownable(timeLockContractAddress)
+    {
         i_auraCoin = auraCoin;
         i_wethAddress = weth;
         i_ethINRPriceFeed = ethINRPriceFeed;
+        i_timeLockContract = timeLockContractAddress;
     }
 
     receive() external payable {}
@@ -171,7 +181,7 @@ contract AuraEngine is ReentrancyGuard {
         nonReentrant
     {
         uint256 startingHealthFactor = getHealthFactor(_userToLiquidate);
-        if (startingHealthFactor > THRESHOLD_HEALTH_FACTOR * PRECISION_FACTOR) {
+        if (startingHealthFactor > (THRESHOLD_HEALTH_FACTOR * PRECISION_FACTOR) / THRESHOLD_HEALTH_FACTOR_PRECISION) {
             revert AuraEngine__HealthFactorAlreadyGood();
         }
 
@@ -268,7 +278,7 @@ contract AuraEngine is ReentrancyGuard {
      */
     function _revertIfHealthFactorIsBroken(address _user) internal view {
         uint256 healthFactor = getHealthFactor(_user);
-        if (healthFactor < THRESHOLD_HEALTH_FACTOR * PRECISION_FACTOR) {
+        if (healthFactor < (THRESHOLD_HEALTH_FACTOR * PRECISION_FACTOR) / THRESHOLD_HEALTH_FACTOR_PRECISION) {
             revert AuraEngine__HealthFactorBroken();
         }
     }
@@ -356,5 +366,38 @@ contract AuraEngine is ReentrancyGuard {
      */
     function getAuraCoinMintedByUsers(address _user) public view returns (uint256) {
         return s_userToAuraCoinMinted[_user];
+    }
+
+    /**
+     * @return address Address of the TimeLock Contract
+     */
+    function getTimeLockContract() public view returns (address) {
+        return i_timeLockContract;
+    }
+
+    /*///////////////////////////////////////
+              OWNER FUNCTIONS
+    ///////////////////////////////////////*/
+
+    /**
+     * @dev this function will be called by the timelock contract
+     * @param _newBonusPercentage the new Bonus percentage which is being set by the community voting
+     */
+    function updateTheLiquidationBonus(uint256 _newBonusPercentage) internal onlyOwner {
+        if (_newBonusPercentage > 15 || _newBonusPercentage < 5) {
+            revert AuraEngine__ProtocolWillBreakIfBonusIsTooMuch();
+        }
+        LIQUIDATION_BONUS = _newBonusPercentage;
+    }
+
+    /**
+     * @notice If you want to provide an overcollateralization value of for example-> 1.5 then provide 15 in the parameter as solidity don't have integer so make sure multiplying the answer with 10
+     * @param _newOvercollateralizedPercent The new percentage for over-collaterlaization decided by the community
+     */
+    function updateTheLiquidationThreshold(uint8 _newOvercollateralizedPercent) internal onlyOwner {
+        if (_newOvercollateralizedPercent < 12 || _newOvercollateralizedPercent > type(uint8).max) {
+            revert AuraEngine__OverCollateralizationNotValid();
+        }
+        THRESHOLD_HEALTH_FACTOR = _newOvercollateralizedPercent;
     }
 }
