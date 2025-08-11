@@ -30,16 +30,29 @@ contract DeployAuraGovernor is Script {
         timeLock = new TimeLock(MIN_DELAY, proposers, executors);
         auraGovernor = new AuraGovernor(auraPowerToken, timeLock);
 
+        /**
+         * The Proposer role is in charge of queueing operations ,it should be only and only granted to the governor contract.
+         */
         bytes32 proposerRole = timeLock.PROPOSER_ROLE();
+
+        /**
+         * this is in charge of executing already available operations,and it should be assigned to address(0) which means that anyone can execute .
+         */
         bytes32 executorRole = timeLock.EXECUTOR_ROLE();
+
+        /**
+         * Admin Role is a very sensitive role which should be assign only to the timelock itself as it inclues the granting and revoking of the two previous roles.
+         */
         bytes32 adminRole = timeLock.DEFAULT_ADMIN_ROLE();
 
         timeLock.grantRole(proposerRole, address(auraGovernor));
         timeLock.grantRole(executorRole, address(0));
         timeLock.revokeRole(adminRole, config.defaultOwner);
 
-        address mostRecentlyDeployed = DevOpsTools.get_most_recent_deployment("AuraEngine", block.chainid);
-        AuraEngine(payable(mostRecentlyDeployed)).transferOwnership(address(timeLock));
+        if (block.chainid != 31337) {
+            address mostRecentlyDeployed = DevOpsTools.get_most_recent_deployment("AuraEngine", block.chainid);
+            AuraEngine(payable(mostRecentlyDeployed)).transferOwnership(address(timeLock));
+        }
         vm.stopBroadcast();
         return (timeLock, auraGovernor, auraPowerToken);
     }
