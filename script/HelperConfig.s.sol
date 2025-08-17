@@ -9,8 +9,8 @@ contract HelperConfig is Script {
     error HelperConfig__InvalidChainID();
 
     struct NetworkConfig {
-        address weth;
-        address ethUSDPriceFeed;
+        address token;
+        address priceFeed;
         address defaultOwner;
     }
 
@@ -47,8 +47,8 @@ contract HelperConfig is Script {
 
     function getSepoliaEthConfig() public pure returns (NetworkConfig memory) {
         NetworkConfig memory sepoliaConfig = NetworkConfig({
-            weth: 0xdd13E55209Fd76AfE204dBda4007C227904f0a81,
-            ethUSDPriceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
+            token: 0xdd13E55209Fd76AfE204dBda4007C227904f0a81,
+            priceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
             defaultOwner: DEFAULT_WALLET
         });
 
@@ -56,7 +56,7 @@ contract HelperConfig is Script {
     }
 
     function getOrCreateAnvilConfig() public returns (NetworkConfig memory) {
-        if (activeNetworkConfig.weth != address(0)) {
+        if (activeNetworkConfig.token != address(0)) {
             return activeNetworkConfig;
         }
         vm.startBroadcast();
@@ -64,7 +64,6 @@ contract HelperConfig is Script {
         ERC20Mock weth = new ERC20Mock();
         vm.stopBroadcast();
 
-        return
-            NetworkConfig({weth: address(weth), ethUSDPriceFeed: address(ethUsdPriceFeed), defaultOwner: ANVIL_WALLET});
+        return NetworkConfig({token: address(weth), priceFeed: address(ethUsdPriceFeed), defaultOwner: ANVIL_WALLET});
     }
 }
