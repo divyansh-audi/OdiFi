@@ -69,6 +69,9 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     error DSCEngine__HealthFactorNotImproved();
     error AuraEngine__ProtocolWillBreakIfBonusIsTooMuch();
     error AuraEngine__OverCollateralizationNotValid();
+    error AuraEngine__TokenNotAllowedAsCollateral();
+    error AuraEngine__TokenAlreadyAllowed();
+    error DSCEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
 
     /*///////////////////////////////////////
                     TYPES
@@ -80,11 +83,15 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     ///////////////////////////////////////*/
 
     AuraCoin private immutable i_auraCoin;
-    address private immutable i_wethAddress;
-    address private immutable i_ethUSDPriceFeed;
-    // address private immutable i_timeLockContract;
+    address[] public s_collateralTokens;
 
-    mapping(address user => uint256 amountDepositedInEth) s_userToCollateralDepositedInEth;
+    // address private immutable i_wethAddress;
+    // address private immutable i_ethUSDPriceFeed;
+    // address private immutable i_timeLockContract;
+    // mapping(address user => uint256 amountDepositedInEth) s_userToCollateralDepositedInEth;
+
+    mapping(address collateralAddress => address collateralPriceFeedAddress) public s_collateralToPriceFeed;
+    mapping(address user => mapping(address collateralToken => uint256 amount)) public s_collateralDeposited;
     mapping(address user => uint256 tokensMinted) s_userToAuraCoinMinted;
 
     uint8 private constant USD_INR_PRICE = 85; // because of unavailability of inr priice feeds directly ,this will be usd *85--> almost equivalent to INR
@@ -100,8 +107,12 @@ contract AuraEngine is ReentrancyGuard, Ownable {
                      EVENTS
     ///////////////////////////////////////*/
 
-    event CollateralDeposited(address indexed from, uint256 indexed amountDepositedAsCollateral);
-    event CollateralReedemed(address indexed user, address indexed to, uint256 indexed amountRedeemedAsCollateral);
+    event CollateralDeposited(
+        address indexed from, address indexed collateralToken, uint256 indexed amountDepositedAsCollateral
+    );
+    event CollateralReedemed(
+        address indexed user, address to, address indexed collateralToken, uint256 indexed amountRedeemed
+    );
 
     /*///////////////////////////////////////
                    MODIFIER
@@ -113,14 +124,31 @@ contract AuraEngine is ReentrancyGuard, Ownable {
         _;
     }
 
+    modifier isAllowedCollateral(address _token) {
+        if (s_collateralToPriceFeed[_token] == address(0)) {
+            revert AuraEngine__TokenNotAllowedAsCollateral();
+        }
+        _;
+    }
+
     /*///////////////////////////////////////
                    FUNCTIONS
     ///////////////////////////////////////*/
 
-    constructor(AuraCoin auraCoin, address weth, address ethUSDPriceFeed, address owner) Ownable(owner) {
+    constructor(address[] memory tokenAddress, address[] memory priceFeedAddress, AuraCoin auraCoin, address owner)
+        Ownable(owner)
+    {
+        if (tokenAddress.length != priceFeedAddress.length) {
+            revert DSCEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
+        }
+
+        for (uint256 i = 0; i < tokenAddress.length; i++) {
+            s_collateralToPriceFeed[tokenAddress[i]] = priceFeedAddress[i];
+            s_collateralTokens.push(tokenAddress[i]);
+        }
         i_auraCoin = auraCoin;
-        i_wethAddress = weth;
-        i_ethUSDPriceFeed = ethUSDPriceFeed;
+        // i_wethAddress = weth;
+        // i_ethUSDPriceFeed = ethUSDPriceFeed;
         // i_timeLockContract = timeLockContractAddress;
     }
 
@@ -133,33 +161,43 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * This function will do two things -->
      * 1. Deposit the collateral
      * 2. Mint the AuraCoin Based on collateral deposited
-     * @param _amountOfCollateralToDepositInEth Amount to deposit as collateral In Eth
+     * @param _collateralToken The address of the collateral token being deposited.
+     * @param _amountOfCollateralToDeposit Amount of the collateral token to deposit.
+     * @param _amountAuraToMint Amount of AuraCoin to mint.
      */
-    function depositCollateralAndMintAura(uint256 _amountOfCollateralToDepositInEth, uint256 _amountAuraToMint)
-        external
-    {
-        _depositCollateral(_amountOfCollateralToDepositInEth);
+    function depositCollateralAndMintAura(
+        address _collateralToken,
+        uint256 _amountOfCollateralToDeposit,
+        uint256 _amountAuraToMint
+    ) external {
+        _depositCollateral(_collateralToken, _amountOfCollateralToDeposit);
         _mintAuraCoin(_amountAuraToMint);
     }
 
     /**
      * @dev This function is calling the public functions burnAura and redeemCollateral
      */
-    function redeemCollateralAndBurnAura(uint256 _amountOfCollateralToRedeem, uint256 _amountAuraToBurn) public {
+    function redeemCollateralAndBurnAura(
+        address _collateralToken,
+        uint256 _amountOfCollateralToRedeem,
+        uint256 _amountAuraToBurn
+    ) public {
         burnAura(_amountAuraToBurn);
-        redeemCollateral(_amountOfCollateralToRedeem);
+        redeemCollateral(_collateralToken, _amountOfCollateralToRedeem);
     }
 
     /**
      * @dev This functions redeems collatercal and check for the health factor after that
      * @param _amountOfCollateralToRedeem Amount of collateral which the msg.sender wants to redeem
+     * @param _collateralToken The address of the collateral token to redeem.
      */
-    function redeemCollateral(uint256 _amountOfCollateralToRedeem)
+    function redeemCollateral(address _collateralToken, uint256 _amountOfCollateralToRedeem)
         public
         nonReentrant
         mustBeMoreThanZero(_amountOfCollateralToRedeem)
+        isAllowedCollateral(_collateralToken)
     {
-        _redeemCollateral(msg.sender, msg.sender, _amountOfCollateralToRedeem);
+        _redeemCollateral(msg.sender, msg.sender, _collateralToken, _amountOfCollateralToRedeem);
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
@@ -174,23 +212,27 @@ contract AuraEngine is ReentrancyGuard, Ownable {
 
     /**
      * @param _userToLiquidate The user which is getting liquidated
+     *  @param _collateralToSeize The collateral token the liquidator will receive.
      * @param _debtToCover Amount of debt liquidator wants to cover
      */
-    function liquidate(address _userToLiquidate, uint256 _debtToCover)
+    function liquidate(address _userToLiquidate, address _collateralToSeize, uint256 _debtToCover)
         external
         mustBeMoreThanZero(_debtToCover)
         nonReentrant
+        isAllowedCollateral(_collateralToSeize)
     {
         uint256 startingHealthFactor = getHealthFactorByUserAddressInProtocol(_userToLiquidate);
-        if (startingHealthFactor > MIN_HEALTH_FACTOR) {
+        if (startingHealthFactor >= MIN_HEALTH_FACTOR) {
             revert AuraEngine__HealthFactorAlreadyGood();
         }
 
-        uint256 amountToClaimFromDebt = getETHforINR(_debtToCover);
+        // The amount of collateral (in its own units) equivalent to the debt being covered.
+        uint256 amountOfCollateralToCoverDebt = getTokensForINR(_collateralToSeize, _debtToCover);
 
-        uint256 bonusCollateral = (amountToClaimFromDebt * LIQUIDATION_BONUS / LIQUIDATION_PRECISION);
-        uint256 totalCollateralToReedeem = amountToClaimFromDebt + bonusCollateral;
-        _redeemCollateral(_userToLiquidate, msg.sender, totalCollateralToReedeem);
+        uint256 bonusCollateral = (amountOfCollateralToCoverDebt * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
+        uint256 totalCollateralToRedeem = amountOfCollateralToCoverDebt + bonusCollateral;
+
+        _redeemCollateral(_userToLiquidate, msg.sender, _collateralToSeize, totalCollateralToRedeem);
         _burnAura(_userToLiquidate, msg.sender, _debtToCover);
 
         uint256 endingUserHealthFactor = getHealthFactorByUserAddressInProtocol(_userToLiquidate);
@@ -212,12 +254,18 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      *
      * @param _from The guy who has submitted the collateral
      * @param _to address which wants claim the collateral
+     * @param _collateralToken The address of the collateral token.
      * @param _amountOfCollateralToRedeem amount of collateral to redeem
      */
-    function _redeemCollateral(address _from, address _to, uint256 _amountOfCollateralToRedeem) internal {
-        s_userToCollateralDepositedInEth[_from] -= _amountOfCollateralToRedeem;
-        emit CollateralReedemed(_from, _to, _amountOfCollateralToRedeem);
-        bool success = IERC20(i_wethAddress).transfer(_to, _amountOfCollateralToRedeem);
+    function _redeemCollateral(
+        address _from,
+        address _to,
+        address _collateralToken,
+        uint256 _amountOfCollateralToRedeem
+    ) internal {
+        s_collateralDeposited[_from][_collateralToken] -= _amountOfCollateralToRedeem;
+        emit CollateralReedemed(_from, _to, _collateralToken, _amountOfCollateralToRedeem);
+        bool success = IERC20(_collateralToken).transfer(_to, _amountOfCollateralToRedeem);
         if (!success) {
             revert AuraEngine__CollateralNotRedeemed();
         }
@@ -240,13 +288,19 @@ contract AuraEngine is ReentrancyGuard, Ownable {
 
     /**
      * This function will deposit collateral to this AuraEngine contract .
-     * @param _amountInEth Amount of collateral in ETH
+     * @param _collateralToken The address of the collateral token being deposited.
+     * @param _amountToDeposit The amount of collateral to deposit.
      * @notice In this function the state is first updated to ensure safety and re-entrency safety .
      */
-    function _depositCollateral(uint256 _amountInEth) internal mustBeMoreThanZero(_amountInEth) nonReentrant {
-        s_userToCollateralDepositedInEth[msg.sender] = _amountInEth;
-        emit CollateralDeposited(msg.sender, _amountInEth);
-        bool success = IERC20(i_wethAddress).transferFrom(msg.sender, address(this), _amountInEth);
+    function _depositCollateral(address _collateralToken, uint256 _amountToDeposit)
+        internal
+        mustBeMoreThanZero(_amountToDeposit)
+        nonReentrant
+        isAllowedCollateral(_collateralToken)
+    {
+        s_collateralDeposited[msg.sender][_collateralToken] += _amountToDeposit;
+        emit CollateralDeposited(msg.sender, _collateralToken, _amountToDeposit);
+        bool success = IERC20(_collateralToken).transferFrom(msg.sender, address(this), _amountToDeposit);
         if (!success) {
             revert AuraEngine__CollateralNotDeposited();
         }
@@ -292,48 +346,67 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @return uint256 it returns 4 * 1e18 in case of above example.
      */
     function getHealthFactorByUserAddressInProtocol(address _user) public view returns (uint256) {
-        uint256 collateralDepositedInEth = getCollateralDepositedByUsers(_user);
+        uint256 totalCollateralValueInINR;
         uint256 amountOfAuraCoinMintedInINR = getAuraCoinMintedByUsers(_user);
 
-        uint256 healthFactor = getHealthFactor(collateralDepositedInEth, amountOfAuraCoinMintedInINR);
+        // Loop through all allowed collateral tokens
+        for (uint256 i = 0; i < s_collateralTokens.length; i++) {
+            address collateralToken = s_collateralTokens[i];
+            uint256 amount = s_collateralDeposited[_user][collateralToken];
+            if (amount > 0) {
+                totalCollateralValueInINR += getTokenValueInINR(collateralToken, amount);
+            }
+        }
+
+        uint256 healthFactor = getHealthFactor(totalCollateralValueInINR, amountOfAuraCoinMintedInINR);
         return healthFactor;
     }
 
     /**
      * @notice anyone can check the health factor using this function
-     * @param _collateralDeposited amount of collateral in eth deposited
+     * @param _totalCollateralValueInINR amount of collateral in inr deposited
      * @param _auraMinted amount of Aura minted (if 1000 rupee -> represent it as 1000 ether)
      */
-    function getHealthFactor(uint256 _collateralDeposited, uint256 _auraMinted) public view returns (uint256) {
-        uint256 collateralValueInINR = getINRforEth(_collateralDeposited);
-        uint256 healthFactor = (collateralValueInINR * PRECISION_FACTOR * THRESHOLD_HEALTH_FACTOR_PRECISION)
+    // uint8 private constant THRESHOLD_HEALTH_FACTOR_PRECISION = 10;
+    // uint256 private constant PRECISION_FACTOR = 1e18;
+    // uint8 private THRESHOLD_HEALTH_FACTOR = 20;
+    function getHealthFactor(uint256 _totalCollateralValueInINR, uint256 _auraMinted) public view returns (uint256) {
+        if (_auraMinted == 0) return type(uint256).max;
+        uint256 healthFactor = (_totalCollateralValueInINR * PRECISION_FACTOR * THRESHOLD_HEALTH_FACTOR_PRECISION)
             / (_auraMinted * THRESHOLD_HEALTH_FACTOR);
         return healthFactor;
     }
 
     /**
-     * @param _amountInEth Amount in ETH to convert in INR
-     * @return uint256 if _amountInEth = 2 ether and price of 1 eth in INR is 1000INR, then this returns 2000*1e18;
+     * @param _tokenAddress The address of the token to value.
+     * @param _amount The amount of the token.
+     * @return uint256 if _amoun = 2 ether and _tokenAddress is `wETH` and price of 1 eth in INR is 1000INR, then this returns 2000*1e18;
      */
-    function getINRforEth(uint256 _amountInEth) public view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(getEthUsdPriceFeed());
-        (, int256 price,,,) = priceFeed.staleCheckLatestRoundData(); // this return value in 8 decimal places ,we need to add 10 more
-        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE; // this will give inr price in ether format
-        console2.log("adjusted price:", adjustedPrice);
-        uint256 finalValue = adjustedPrice * _amountInEth / PRECISION_FACTOR;
-        return finalValue;
+    function getTokenValueInINR(address _tokenAddress, uint256 _amount) public view returns (uint256) {
+        address priceFeedAddress = s_collateralToPriceFeed[_tokenAddress];
+        if (priceFeedAddress == address(0)) {
+            revert AuraEngine__TokenNotAllowedAsCollateral();
+        }
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddress);
+        (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
+        // Assumes price feed is USD based with 8 decimals, common for Chainlink
+        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE;
+        return (adjustedPrice * _amount) / PRECISION_FACTOR;
     }
 
     /**
      * @param _amountInINR Amount in INR to convert in ETH
      * @return uint256 if _amountInEth = 2000INR and price of 1 eth in INR is 1000INR, then this returns 2 ether
      */
-    function getETHforINR(uint256 _amountInINR) public view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(getEthUsdPriceFeed());
+    function getTokensForINR(address _tokenAddress, uint256 _amountInINR) public view returns (uint256) {
+        address priceFeedAddress = s_collateralToPriceFeed[_tokenAddress];
+        if (priceFeedAddress == address(0)) {
+            revert AuraEngine__TokenNotAllowedAsCollateral();
+        }
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddress);
         (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
-        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE; // this will give INR
-        uint256 finalPrice = _amountInINR * PRECISION_FACTOR / (adjustedPrice);
-        return finalPrice;
+        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE;
+        return (_amountInINR * PRECISION_FACTOR) / adjustedPrice;
     }
 
     /**
@@ -344,25 +417,10 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     }
 
     /**
-     * @return address Address of WethToken
+     * @return address this return an array of collateral token addresses.
      */
-    function getWethTokenAddress() public view returns (address) {
-        return i_wethAddress;
-    }
-
-    /**
-     * @return address Address for ETH/USD price feed.
-     */
-    function getEthUsdPriceFeed() public view returns (address) {
-        return i_ethUSDPriceFeed;
-    }
-
-    /**
-     * @param _user User to know how much collateral to deposit
-     * @return uint256 Amount of collateral deposit by the `_user`.
-     */
-    function getCollateralDepositedByUsers(address _user) public view returns (uint256) {
-        return s_userToCollateralDepositedInEth[_user];
+    function getCollateralTokens() public view returns (address[] memory) {
+        return s_collateralTokens;
     }
 
     /**
@@ -387,6 +445,19 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     /*///////////////////////////////////////
               OWNER FUNCTIONS
     ///////////////////////////////////////*/
+
+    /**
+     * @notice Adds a new collateral token and its price feed to the protocol.
+     * @param _collateralToken The address of the token to add.
+     * @param _priceFeed The address of the Chainlink price feed for the token.
+     */
+    function addCollateralType(address _collateralToken, address _priceFeed) external onlyOwner {
+        if (s_collateralToPriceFeed[_collateralToken] != address(0)) {
+            revert AuraEngine__TokenAlreadyAllowed();
+        }
+        s_collateralToPriceFeed[_collateralToken] = _priceFeed;
+        s_collateralTokens.push(_collateralToken);
+    }
 
     /**
      * @dev this function will be called by the timelock contract
