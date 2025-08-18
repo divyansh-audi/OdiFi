@@ -36,6 +36,7 @@ contract AuraEngineTest is Test {
         (weth, ethUSDPriceFeed, defaultOwner) = config.activeNetworkConfig();
         ERC20Mock(weth).mint(USER, INITIAL_WETH_BALANCE);
         ERC20Mock(weth).mint(ALICE, INITIAL_WETH_BALANCE);
+        ERC20Mock(weth).mint(DEFAULT_OWNER, INITIAL_WETH_BALANCE);
         tokenAddresses.push(weth);
         priceFeedAddresses.push(ethUSDPriceFeed);
     }
@@ -151,5 +152,70 @@ contract AuraEngineTest is Test {
         assertEq(healthThreshold, 40);
         assertEq(auraEngine.getAuraCoinMintedByUsers(USER), AURA_TO_MINT * 3 / 4);
         assert(healthFactorAfter > healthFactorBefore);
+    }
+
+    function testAddingCollateralWorksFine(address collateral, address priceFeed) public {
+        vm.prank(DEFAULT_OWNER);
+        auraEngine.addCollateralType(collateral, priceFeed);
+        assertEq(auraEngine.getCollateralTokens()[1], collateral);
+        assertEq(auraEngine.getPriceFeed(collateral), priceFeed);
+    }
+
+    function testCheckUpkeepRunsFine() public {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(auraEngine), INITIAL_WETH_BALANCE);
+        auraEngine.depositCollateralAndMintAura(weth, AMOUNT_TO_DEPOSIT + 2 ether, AURA_TO_MINT);
+        vm.stopPrank();
+        vm.startPrank(ALICE);
+        ERC20Mock(weth).approve(address(auraEngine), INITIAL_WETH_BALANCE);
+        // auraEngine.depositCollateralAndMintAura(weth, AMOUNT_TO_DEPOSIT + 2 ether, AURA_TO_MINT);
+        auraEngine.depositCollateralAndMintAura(weth, AMOUNT_TO_DEPOSIT + 1 ether, AURA_TO_MINT);
+
+        vm.stopPrank();
+        vm.startPrank(DEFAULT_OWNER);
+        auraEngine.updateTheLiquidationThreshold(40);
+        (bool checkUpkeep,) = auraEngine.checkUpkeep("");
+        vm.stopPrank();
+
+        // assertEq(checkUpkeep, false);
+        assertEq(checkUpkeep, true);
+    }
+
+    /**
+     * USER-> deposited 3 ether as collateral ,minted 1 ether-> as Aura
+     * HEALTH FACTOR ->1.5 (3/1*2)
+     * threshold changed -> 4
+     * HEALTH FACTOR ->0.75 (3/1*4)
+     * liquidate half of the debt ->0.5 ether
+     * and redeemed (0.5+0.5*10/100)=>0.55 ether
+     * collateral left ->2.45 ether and remaining debt ->0.5 ether
+     * health factor ->2.45/0.5*4=1.225
+     * which is fine
+     */
+    function testPerformUpkeepWorksFine() public {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(auraEngine), INITIAL_WETH_BALANCE);
+        auraEngine.depositCollateralAndMintAura(weth, AMOUNT_TO_DEPOSIT + 2 ether, AURA_TO_MINT);
+        vm.stopPrank();
+        vm.startPrank(ALICE);
+        ERC20Mock(weth).approve(address(auraEngine), INITIAL_WETH_BALANCE);
+        // auraEngine.depositCollateralAndMintAura(weth, AMOUNT_TO_DEPOSIT + 2 ether, AURA_TO_MINT);
+        auraEngine.depositCollateralAndMintAura(weth, AMOUNT_TO_DEPOSIT + 1 ether, AURA_TO_MINT);
+
+        vm.stopPrank();
+        vm.startPrank(DEFAULT_OWNER);
+        ERC20Mock(weth).approve(address(auraEngine), INITIAL_WETH_BALANCE);
+        auraEngine.depositCollateralAndMintAura(weth, AMOUNT_TO_DEPOSIT + 2 ether, AURA_TO_MINT);
+        // auraCoin.approve(DEFAULT_OWNER, AURA_TO_MINT);
+        auraCoin.approve(address(auraEngine), AURA_TO_MINT);
+        auraEngine.updateTheLiquidationThreshold(40);
+        console2.log("first check");
+        assertEq(1 ether, auraEngine.getHealthFactorByUserAddressInProtocol(USER));
+        (bool checkUpkeep, bytes memory performData) = auraEngine.checkUpkeep("");
+        auraEngine.performUpkeep(performData);
+        vm.stopPrank();
+        assertEq(checkUpkeep, true);
+        assertEq(1.225 ether, auraEngine.getHealthFactorByUserAddressInProtocol(ALICE));
+        assertEq(ALICE, abi.decode(performData, (address)));
     }
 }

@@ -30,6 +30,8 @@ import {AggregatorV3Interface} from "@chainlink-brownie/contracts/src/v0.8/share
 import {OracleLib} from "./libraries/OracleLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {console2} from "forge-std/console2.sol";
+import {AutomationCompatibleInterface} from
+    "@chainlink-brownie/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 // import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 /**
@@ -55,7 +57,7 @@ import {console2} from "forge-std/console2.sol";
  *
  * @notice There are some onlyOwner functions which is for governance purpose and the community can propose for the changes ,basically someone will propose a change ,voting will happen and then Governor will tell the Timelock contract to change that thing in this contract ,so after deploying ,the ownership of this should be sent to TimeLock Contract.
  */
-contract AuraEngine is ReentrancyGuard, Ownable {
+contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
     /*///////////////////////////////////////
                    ERRORS
     ///////////////////////////////////////*/
@@ -83,16 +85,18 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     ///////////////////////////////////////*/
 
     AuraCoin private immutable i_auraCoin;
-    address[] public s_collateralTokens;
+    address[] private s_collateralTokens;
+    address[] private s_usersWithDebt;
 
     // address private immutable i_wethAddress;
     // address private immutable i_ethUSDPriceFeed;
     // address private immutable i_timeLockContract;
     // mapping(address user => uint256 amountDepositedInEth) s_userToCollateralDepositedInEth;
 
-    mapping(address collateralAddress => address collateralPriceFeedAddress) public s_collateralToPriceFeed;
-    mapping(address user => mapping(address collateralToken => uint256 amount)) public s_collateralDeposited;
-    mapping(address user => uint256 tokensMinted) s_userToAuraCoinMinted;
+    mapping(address collateralAddress => address collateralPriceFeedAddress) private s_collateralToPriceFeed;
+    mapping(address user => mapping(address collateralToken => uint256 amount)) private s_collateralDeposited;
+    mapping(address user => uint256 tokensMinted) private s_userToAuraCoinMinted;
+    mapping(address => uint256) private s_userIndexInDebtArray;
 
     uint8 private constant USD_INR_PRICE = 85; // because of unavailability of inr priice feeds directly ,this will be usd *85--> almost equivalent to INR
     uint8 private THRESHOLD_HEALTH_FACTOR = 20;
@@ -113,6 +117,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     event CollateralReedemed(
         address indexed user, address to, address indexed collateralToken, uint256 indexed amountRedeemed
     );
+    event UserAddedInDebtArrayAndMapping(address indexed user, uint256 indexed amount);
 
     /*///////////////////////////////////////
                    MODIFIER
@@ -216,7 +221,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      * @param _debtToCover Amount of debt liquidator wants to cover
      */
     function liquidate(address _userToLiquidate, address _collateralToSeize, uint256 _debtToCover)
-        external
+        public
         mustBeMoreThanZero(_debtToCover)
         nonReentrant
         isAllowedCollateral(_collateralToSeize)
@@ -242,8 +247,60 @@ contract AuraEngine is ReentrancyGuard, Ownable {
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
-    function checkUpkeep() external {}
-    function performUpKeep() external {}
+    /**
+     * @dev this function will be called by the chainlink nodes in order to check for the condition
+     * First loop through the array if those users who are in the protocol
+     * or I can make a function which will increment the number each time
+     * and check the health Factor .
+     */
+    function checkUpkeep(bytes calldata /*checkData*/ )
+        public
+        view
+        returns (bool upkeepNeeded, bytes memory performData)
+    {
+        // if(s_usersWithDebt.length==0) return (false,""); --> this is an extra line which is not needed
+        for (uint256 i = 0; i < (s_usersWithDebt.length); i++) {
+            address user = s_usersWithDebt[i];
+            if (s_userIndexInDebtArray[user] == 0) {
+                continue;
+            }
+            uint256 healthFactor = getHealthFactorByUserAddressInProtocol(user);
+            if (healthFactor < MIN_HEALTH_FACTOR) {
+                upkeepNeeded = true;
+                performData = abi.encode(user);
+                break;
+            }
+        }
+    }
+
+    /**
+     * @param performData This will be the encoded value given by checkUpkeep .
+     * 1. Decode the user address
+     * 2. Check which collateral token has the most value while depositing collateral
+     * 3. Iterate and find that
+     * 4. For now assuming that the collateral which is chosen has atleast 50% of the overall value
+     * 5. calling the liquidate function .
+     */
+    function performUpkeep(bytes calldata performData) external {
+        address userToLiquidate = abi.decode(performData, (address));
+        address mostDepositedCollateral;
+        uint256 mostDepositedCollateralValue;
+        for (uint256 i = 0; i < s_collateralTokens.length; i++) {
+            address collateral = s_collateralTokens[i];
+            uint256 valueOfCollateral = s_collateralDeposited[userToLiquidate][collateral];
+            if (valueOfCollateral > 0) {
+                uint256 inrOfThatCollateral = getTokenValueInINR(collateral, valueOfCollateral);
+                if (valueOfCollateral > mostDepositedCollateralValue) {
+                    mostDepositedCollateralValue = inrOfThatCollateral;
+                    mostDepositedCollateral = collateral;
+                }
+            }
+        }
+        uint256 debtToCover = getAuraCoinMintedByUsers(userToLiquidate) / 2;
+        if (mostDepositedCollateral != address(0)) {
+            liquidate(userToLiquidate, mostDepositedCollateral, debtToCover);
+        }
+    }
 
     /*///////////////////////////////////////
               INTERNAL FUNCTIONS
@@ -313,6 +370,11 @@ contract AuraEngine is ReentrancyGuard, Ownable {
      */
     function _mintAuraCoin(uint256 _amountAuraToMint) internal mustBeMoreThanZero(_amountAuraToMint) nonReentrant {
         s_userToAuraCoinMinted[msg.sender] += _amountAuraToMint;
+        if (s_userIndexInDebtArray[msg.sender] == 0) {
+            s_usersWithDebt.push(msg.sender);
+            s_userIndexInDebtArray[msg.sender] = _amountAuraToMint;
+            emit UserAddedInDebtArrayAndMapping(msg.sender, _amountAuraToMint);
+        }
         _revertIfHealthFactorIsBroken(msg.sender);
         bool success = i_auraCoin.mint(msg.sender, _amountAuraToMint);
         if (!success) {
@@ -370,6 +432,7 @@ contract AuraEngine is ReentrancyGuard, Ownable {
     // uint8 private constant THRESHOLD_HEALTH_FACTOR_PRECISION = 10;
     // uint256 private constant PRECISION_FACTOR = 1e18;
     // uint8 private THRESHOLD_HEALTH_FACTOR = 20;
+
     function getHealthFactor(uint256 _totalCollateralValueInINR, uint256 _auraMinted) public view returns (uint256) {
         if (_auraMinted == 0) return type(uint256).max;
         uint256 healthFactor = (_totalCollateralValueInINR * PRECISION_FACTOR * THRESHOLD_HEALTH_FACTOR_PRECISION)
@@ -440,6 +503,10 @@ contract AuraEngine is ReentrancyGuard, Ownable {
 
     function getThresholdHealthFactor() public view returns (uint8) {
         return THRESHOLD_HEALTH_FACTOR;
+    }
+
+    function getPriceFeed(address _tokenAddress) public view returns (address) {
+        return s_collateralToPriceFeed[_tokenAddress];
     }
 
     /*///////////////////////////////////////
