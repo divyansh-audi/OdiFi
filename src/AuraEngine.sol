@@ -32,6 +32,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {console2} from "forge-std/console2.sol";
 import {AutomationCompatibleInterface} from
     "@chainlink-brownie/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import {AutomationFund} from "src/AutomationFund.sol";
 // import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 /**
@@ -68,12 +69,12 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
     error AuraEngine__HealthFactorBroken();
     error AuraEngine__CollateralNotRedeemed();
     error AuraEngine__HealthFactorAlreadyGood();
-    error DSCEngine__HealthFactorNotImproved();
+    error AuraEngine__HealthFactorNotImproved();
     error AuraEngine__ProtocolWillBreakIfBonusIsTooMuch();
     error AuraEngine__OverCollateralizationNotValid();
     error AuraEngine__TokenNotAllowedAsCollateral();
     error AuraEngine__TokenAlreadyAllowed();
-    error DSCEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
+    error AuraEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
 
     /*///////////////////////////////////////
                     TYPES
@@ -85,6 +86,7 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
     ///////////////////////////////////////*/
 
     AuraCoin private immutable i_auraCoin;
+    AutomationFund private immutable i_automationFund;
     address[] private s_collateralTokens;
     address[] private s_usersWithDebt;
 
@@ -140,11 +142,15 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
                    FUNCTIONS
     ///////////////////////////////////////*/
 
-    constructor(address[] memory tokenAddress, address[] memory priceFeedAddress, AuraCoin auraCoin, address owner)
-        Ownable(owner)
-    {
+    constructor(
+        address[] memory tokenAddress,
+        address[] memory priceFeedAddress,
+        AuraCoin auraCoin,
+        address owner,
+        AutomationFund automationFund
+    ) Ownable(owner) {
         if (tokenAddress.length != priceFeedAddress.length) {
-            revert DSCEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
+            revert AuraEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
         }
 
         for (uint256 i = 0; i < tokenAddress.length; i++) {
@@ -152,6 +158,7 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
             s_collateralTokens.push(tokenAddress[i]);
         }
         i_auraCoin = auraCoin;
+        i_automationFund = automationFund;
         // i_wethAddress = weth;
         // i_ethUSDPriceFeed = ethUSDPriceFeed;
         // i_timeLockContract = timeLockContractAddress;
@@ -242,7 +249,7 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
 
         uint256 endingUserHealthFactor = getHealthFactorByUserAddressInProtocol(_userToLiquidate);
         if (endingUserHealthFactor <= startingHealthFactor) {
-            revert DSCEngine__HealthFactorNotImproved();
+            revert AuraEngine__HealthFactorNotImproved();
         }
         _revertIfHealthFactorIsBroken(msg.sender);
     }
@@ -297,8 +304,18 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
             }
         }
         uint256 debtToCover = getAuraCoinMintedByUsers(userToLiquidate) / 2;
+
+        uint256 amountOfCollateralToCoverDebt = getTokensForINR(mostDepositedCollateral, debtToCover);
+
+        uint256 bonusCollateral = (amountOfCollateralToCoverDebt * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
+
+        uint256 totalCollateralToRedeem = amountOfCollateralToCoverDebt + bonusCollateral;
+
         if (mostDepositedCollateral != address(0)) {
-            liquidate(userToLiquidate, mostDepositedCollateral, debtToCover);
+            _redeemCollateral(
+                userToLiquidate, address(i_automationFund), mostDepositedCollateral, totalCollateralToRedeem
+            );
+            _burnAura(userToLiquidate, address(i_automationFund), debtToCover);
         }
     }
 

@@ -8,6 +8,7 @@ import {TimeLock} from "src/TimeLock.sol";
 import {HelperConfig} from "./HelperConfig.s.sol";
 import {DevOpsTools} from "lib/foundry-devops/src/DevOpsTools.sol";
 import {AuraEngine} from "src/AuraEngine.sol";
+import {AutomationFund} from "src/AutomationFund.sol";
 
 contract DeployAuraGovernor is Script {
     TimeLock timeLock;
@@ -50,8 +51,12 @@ contract DeployAuraGovernor is Script {
         timeLock.revokeRole(adminRole, config.defaultOwner);
 
         if (block.chainid != 31337) {
-            address mostRecentlyDeployed = DevOpsTools.get_most_recent_deployment("AuraEngine", block.chainid);
-            AuraEngine(payable(mostRecentlyDeployed)).transferOwnership(address(timeLock));
+            address mostRecentlyDeployedEngine = DevOpsTools.get_most_recent_deployment("AuraEngine", block.chainid);
+            AuraEngine(payable(mostRecentlyDeployedEngine)).transferOwnership(address(timeLock));
+
+            address mostRecentlyDeployedAutomationFund =
+                DevOpsTools.get_most_recent_deployment("AutomationFund", block.chainid);
+            AutomationFund(payable(mostRecentlyDeployedAutomationFund)).transferOwnership(address(timeLock));
         }
         vm.stopBroadcast();
         return (timeLock, auraGovernor, auraPowerToken);
