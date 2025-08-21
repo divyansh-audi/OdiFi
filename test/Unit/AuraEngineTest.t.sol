@@ -5,6 +5,7 @@ import {Test, console2} from "@forge-std/Test.sol";
 import {AuraCoin} from "src/AuraCoin.sol";
 import {AuraEngine} from "src/AuraEngine.sol";
 import {DeployAuraEngine} from "script/DeployAuraEngine.s.sol";
+import {AutomationFund} from "src/AutomationFund.sol";
 import {HelperConfig} from "script/HelperConfig.s.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
@@ -17,6 +18,7 @@ contract AuraEngineTest is Test {
     address public weth;
     address public ethUSDPriceFeed;
     address public defaultOwner;
+    AutomationFund public automationFund;
 
     uint8 private constant USD_INR_PRICE = 85;
 
@@ -32,7 +34,7 @@ contract AuraEngineTest is Test {
 
     function setUp() public {
         deploy = new DeployAuraEngine();
-        (auraCoin, auraEngine, config) = deploy.run();
+        (auraCoin, auraEngine, config, automationFund) = deploy.run();
         (weth, ethUSDPriceFeed, defaultOwner) = config.activeNetworkConfig();
         ERC20Mock(weth).mint(USER, INITIAL_WETH_BALANCE);
         ERC20Mock(weth).mint(ALICE, INITIAL_WETH_BALANCE);
@@ -209,13 +211,27 @@ contract AuraEngineTest is Test {
         // auraCoin.approve(DEFAULT_OWNER, AURA_TO_MINT);
         auraCoin.approve(address(auraEngine), AURA_TO_MINT);
         auraEngine.updateTheLiquidationThreshold(40);
-        console2.log("first check");
-        assertEq(1 ether, auraEngine.getHealthFactorByUserAddressInProtocol(USER));
+        // console2.log("first check");
+        automationFund.approveEngine(address(auraCoin), address(auraEngine), 20000000 ether);
         (bool checkUpkeep, bytes memory performData) = auraEngine.checkUpkeep("");
         auraEngine.performUpkeep(performData);
+        uint256 initialAuraBalance = IERC20(weth).balanceOf(address(automationFund));
         vm.stopPrank();
         assertEq(checkUpkeep, true);
+        assertEq(1 ether, auraEngine.getHealthFactorByUserAddressInProtocol(USER));
         assertEq(1.225 ether, auraEngine.getHealthFactorByUserAddressInProtocol(ALICE));
         assertEq(ALICE, abi.decode(performData, (address)));
+        assertEq(initialAuraBalance, 0.55 ether);
+
+        vm.prank(DEFAULT_OWNER);
+        automationFund.withdrawCollateral(weth, 0.55 ether, address(auraEngine));
+
+        assertEq(IERC20(weth).balanceOf(address(automationFund)), 0);
+    }
+
+    function testAutomationFundInitialBalance() public {
+        vm.prank(DEFAULT_OWNER);
+        uint256 initialAuraBalance = IERC20(auraCoin).balanceOf(address(automationFund));
+        assertEq(initialAuraBalance, 20000000 ether);
     }
 }

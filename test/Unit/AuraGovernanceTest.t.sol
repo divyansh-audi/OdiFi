@@ -35,7 +35,7 @@ contract AuraGovernanceTest is Test {
         (timeLock, auraGovernor, auraPowerToken) = deploy.run();
 
         deployAuraEngine = new DeployAuraEngine();
-        (, auraEngine,) = deployAuraEngine.run();
+        (, auraEngine,,) = deployAuraEngine.run();
         vm.prank(USER);
         auraPowerToken.delegate(USER);
     }

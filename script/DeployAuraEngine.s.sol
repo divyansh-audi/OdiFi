@@ -16,7 +16,7 @@ contract DeployAuraEngine is Script {
 
     uint256 public INITIAL_FUNDING_TO_AUTOMATION_FUND = 20000000 ether; //2,00,00,000 INR
 
-    function run() public returns (AuraCoin, AuraEngine, HelperConfig) {
+    function run() public returns (AuraCoin, AuraEngine, HelperConfig, AutomationFund) {
         HelperConfig helperConfig = new HelperConfig();
         HelperConfig.NetworkConfig memory config = helperConfig.getConfig();
         tokenAddresses = [config.token];
@@ -30,6 +30,6 @@ contract DeployAuraEngine is Script {
         auraCoin.transferOwnership(address(auraEngine));
         vm.stopBroadcast();
 
-        return (auraCoin, auraEngine, helperConfig);
+        return (auraCoin, auraEngine, helperConfig, automationFund);
     }
 }
