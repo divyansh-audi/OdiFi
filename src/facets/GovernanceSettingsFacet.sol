@@ -1,103 +1,52 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
+// =============================================================================
+// GOVERNANCE SETTINGS FACET
+// =============================================================================
 
-import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {LibGovernanceStorage} from "../libraries/LibGovernanceStorage.sol";
-import {GovernanceCoreFacet} from "./GovernanceCoreFacet.sol";
+import {LibDiamond} from "../libraries/LibDiamond.sol";
 
-contract GovernanceTimelockFacet {
+contract GovernanceSettingsFacet {
     using LibGovernanceStorage for LibGovernanceStorage.GovernanceStorage;
 
-    event ProposalQueued(uint256 proposalId, uint256 eta);
-    event ProposalExecuted(uint256 proposalId);
+    event VotingDelaySet(uint256 oldVotingDelay, uint256 newVotingDelay);
+    event VotingPeriodSet(uint256 oldVotingPeriod, uint256 newVotingPeriod);
+    event ProposalThresholdSet(uint256 oldProposalThreshold, uint256 newProposalThreshold);
 
-    function queue(address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash)
-        public
-        returns (uint256)
-    {
+    function setVotingDelay(uint256 newVotingDelay) public {
+        LibDiamond.enforceIsContractOwner();
         LibGovernanceStorage.GovernanceStorage storage gs = LibGovernanceStorage.governanceStorage();
-        uint256 proposalId = hashProposal(targets, values, calldatas, descriptionHash);
 
-        require(state(proposalId) == GovernanceCoreFacet.ProposalState.Succeeded, "Governor: proposal not successful");
-
-        uint256 delay = TimelockController(payable(gs.timelock)).getMinDelay();
-        gs.proposals[proposalId].eta = block.timestamp + delay;
-
-        for (uint256 i = 0; i < targets.length; ++i) {
-            TimelockController(payable(gs.timelock)).schedule(
-                targets[i],
-                values[i],
-                calldatas[i],
-                0, // predecessor
-                keccak256(abi.encode(proposalId, i)), // salt
-                delay
-            );
-        }
-
-        emit ProposalQueued(proposalId, gs.proposals[proposalId].eta);
-        return proposalId;
+        emit VotingDelaySet(gs.votingDelay, newVotingDelay);
+        gs.votingDelay = newVotingDelay;
     }
 
-    function execute(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) public payable returns (uint256) {
+    function setVotingPeriod(uint256 newVotingPeriod) public {
+        LibDiamond.enforceIsContractOwner();
         LibGovernanceStorage.GovernanceStorage storage gs = LibGovernanceStorage.governanceStorage();
-        uint256 proposalId = hashProposal(targets, values, calldatas, descriptionHash);
 
-        require(
-            state(proposalId) == GovernanceCoreFacet.ProposalState.Succeeded
-                || state(proposalId) == GovernanceCoreFacet.ProposalState.Queued,
-            "Governor: proposal not ready"
-        );
-
-        gs.proposals[proposalId].executed = true;
-
-        for (uint256 i = 0; i < targets.length; ++i) {
-            TimelockController(payable(gs.timelock)).execute(
-                targets[i],
-                values[i],
-                calldatas[i],
-                0, // predecessor
-                keccak256(abi.encode(proposalId, i)) // salt
-            );
-        }
-
-        emit ProposalExecuted(proposalId);
-        return proposalId;
+        emit VotingPeriodSet(gs.votingPeriod, newVotingPeriod);
+        gs.votingPeriod = newVotingPeriod;
     }
 
-    // Forward declarations needed
-    function hashProposal(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) public pure returns (uint256) {
-        return uint256(keccak256(abi.encode(targets, values, calldatas, descriptionHash)));
+    function setProposalThreshold(uint256 newProposalThreshold) public {
+        LibDiamond.enforceIsContractOwner();
+        LibGovernanceStorage.GovernanceStorage storage gs = LibGovernanceStorage.governanceStorage();
+
+        emit ProposalThresholdSet(gs.proposalThreshold, newProposalThreshold);
+        gs.proposalThreshold = newProposalThreshold;
     }
 
-    function state(uint256 proposalId) public view returns (GovernanceCoreFacet.ProposalState) {
-        // This would delegate to the core facet in a real implementation
-        // For brevity, implementing basic logic here
-        LibGovernanceStorage.GovernanceStorage storage gs = LibGovernanceStorage.governanceStorage();
-        LibGovernanceStorage.ProposalCore storage proposal = gs.proposals[proposalId];
+    function votingDelay() public view returns (uint256) {
+        return LibGovernanceStorage.governanceStorage().votingDelay;
+    }
 
-        if (proposal.executed) {
-            return GovernanceCoreFacet.ProposalState.Executed;
-        }
+    function votingPeriod() public view returns (uint256) {
+        return LibGovernanceStorage.governanceStorage().votingPeriod;
+    }
 
-        if (proposal.eta > 0 && block.timestamp >= proposal.eta) {
-            return GovernanceCoreFacet.ProposalState.Queued;
-        }
-
-        // Simplified state logic - in practice you'd delegate to core facet
-        if (block.number < proposal.endBlock) {
-            return GovernanceCoreFacet.ProposalState.Active;
-        }
-
-        return GovernanceCoreFacet.ProposalState.Succeeded;
+    function proposalThreshold() public view returns (uint256) {
+        return LibGovernanceStorage.governanceStorage().proposalThreshold;
     }
 }

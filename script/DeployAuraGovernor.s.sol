@@ -5,6 +5,7 @@ import {Script} from "@forge-std/Script.sol";
 import {AuraGovernor} from "src/AuraGovernor.sol";
 import {AuraPowerToken} from "src/AuraPowerToken.sol";
 import {TimeLock} from "src/TimeLock.sol";
+import {AuraGovernanceDiamond} from "../src/AuraGovernanceDiamond.sol";
 import {HelperConfig} from "./HelperConfig.s.sol";
 import {DevOpsTools} from "lib/foundry-devops/src/DevOpsTools.sol";
 import {AuraEngine} from "src/AuraEngine.sol";
