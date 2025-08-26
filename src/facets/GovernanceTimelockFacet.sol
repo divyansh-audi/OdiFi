@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-// =============================================================================
-// TIMELOCK INTEGRATION FACET
-// =============================================================================
-
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {LibGovernanceStorage} from "../libraries/LibGovernanceStorage.sol";
 import {GovernanceCoreFacet} from "./GovernanceCoreFacet.sol";
 
+/**
+ * @title GovernanceTimeLockFacet
+ * @author Divyansh Audichya
+ * @notice This Contract is basically the same as the OpenZeppelin's TimeLock Contract
+ */
 contract GovernanceTimelockFacet {
     using LibGovernanceStorage for LibGovernanceStorage.GovernanceStorage;
 

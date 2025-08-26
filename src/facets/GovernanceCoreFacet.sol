@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-// =============================================================================
-// GOVERNANCE CORE FACET
-// =============================================================================
-
+import {console2} from "@forge-std/Script.sol";
 import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {LibGovernanceStorage} from "../libraries/LibGovernanceStorage.sol";
 import {LibDiamond} from "../libraries/LibDiamond.sol";
 
+/**
+ * @title GovernanceCoreFacet
+ * @author Divyansh Audichya
+ * @notice This contract is the same structure as that of OpenZeppelin's Governance Contract.
+ */
 contract GovernanceCoreFacet {
     using LibGovernanceStorage for LibGovernanceStorage.GovernanceStorage;
 
@@ -65,12 +67,15 @@ contract GovernanceCoreFacet {
         string memory description
     ) public returns (uint256) {
         LibGovernanceStorage.GovernanceStorage storage gs = LibGovernanceStorage.governanceStorage();
-
+        console2.log(msg.sender);
+        console2.log(block.number - 1);
+        console2.log(proposalThreshold());
         require(
             IVotes(gs.token).getPastVotes(msg.sender, block.number - 1) >= proposalThreshold(),
             "Governor: proposer votes below proposal threshold"
         );
 
+        console2.log("Inside the delegate call");
         uint256 proposalId = hashProposal(targets, values, calldatas, keccak256(bytes(description)));
 
         require(gs.proposals[proposalId].id == 0, "Governor: proposal already exists");

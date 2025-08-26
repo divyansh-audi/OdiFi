@@ -2,20 +2,24 @@
 pragma solidity ^0.8.30;
 
 import {Test, console2} from "@forge-std/Test.sol";
-import {DeployAuraGovernor} from "script/DeployAuraGovernor.s.sol";
+import {AuraGovernanceDiamond} from "src/AuraGovernanceDiamond.sol";
 import {TimeLock} from "src/TimeLock.sol";
-import {AuraGovernor} from "src/AuraGovernor.sol";
+import {DeployDiamondGovernance} from "script/DeployDiamondGovernance.s.sol";
+
 import {AuraPowerToken} from "src/AuraPowerToken.sol";
 import {AuraEngine} from "src/AuraEngine.sol";
 import {DeployAuraEngine} from "script/DeployAuraEngine.s.sol";
+import {GovernanceCoreFacet} from "src/facets/GovernanceCoreFacet.sol";
+import {GovernanceTimelockFacet} from "src/facets/GovernanceTimelockFacet.sol";
 
 contract AuraGovernanceTest is Test {
-    DeployAuraGovernor public deploy;
+    DeployDiamondGovernance public deploy;
     TimeLock public timeLock;
     AuraPowerToken public auraPowerToken;
-    AuraGovernor public auraGovernor;
+    AuraGovernanceDiamond public auraGovernanceDiamond;
     DeployAuraEngine public deployAuraEngine;
     AuraEngine public auraEngine;
+    // GovernanceTimelockFacet public governanceTimelockFacet;
 
     uint256[] values;
     bytes[] callDatas;
@@ -31,8 +35,8 @@ contract AuraGovernanceTest is Test {
     address public USER = makeAddr("user");
 
     function setUp() public {
-        deploy = new DeployAuraGovernor();
-        (timeLock, auraGovernor, auraPowerToken) = deploy.run();
+        deploy = new DeployDiamondGovernance();
+        (timeLock, auraPowerToken,,,,, auraGovernanceDiamond) = deploy.run();
 
         deployAuraEngine = new DeployAuraEngine();
         (, auraEngine,,) = deployAuraEngine.run();
@@ -53,9 +57,12 @@ contract AuraGovernanceTest is Test {
         values.push(0);
         vm.stopPrank();
 
-        uint256 proposalId = auraGovernor.propose(targets, values, callDatas, description);
+        uint256 proposalId =
+            GovernanceCoreFacet(address(auraGovernanceDiamond)).propose(targets, values, callDatas, description);
 
-        console2.log("Proposal State 1: ", uint256(auraGovernor.state(proposalId)));
+        console2.log(
+            "Proposal State 1: ", uint256(GovernanceCoreFacet(address(auraGovernanceDiamond)).state(proposalId))
+        );
 
         vm.warp(block.timestamp + VOTING_DELAY + 1);
         vm.roll(block.number + VOTING_DELAY + 1);
@@ -64,21 +71,25 @@ contract AuraGovernanceTest is Test {
         uint8 myVote = 1; // in favor
 
         vm.prank(USER);
-        auraGovernor.castVoteWithReason(proposalId, myVote, reason);
+        GovernanceCoreFacet(address(auraGovernanceDiamond)).castVoteWithReason(proposalId, myVote, reason);
 
-        console2.log("Proposal State 2: ", uint256(auraGovernor.state(proposalId)));
+        console2.log(
+            "Proposal State 2: ", uint256(GovernanceCoreFacet(address(auraGovernanceDiamond)).state(proposalId))
+        );
 
         vm.warp(block.timestamp + VOTING_PERIOD + 1);
         vm.roll(block.number + VOTING_PERIOD + 1);
 
-        console2.log("Proposal State3: ", uint256(auraGovernor.state(proposalId)));
+        console2.log(
+            "Proposal State3: ", uint256(GovernanceCoreFacet(address(auraGovernanceDiamond)).state(proposalId))
+        );
         bytes32 descriptionHash = keccak256(abi.encodePacked(description));
-        auraGovernor.queue(targets, values, callDatas, descriptionHash);
+        GovernanceTimelockFacet(address(auraGovernanceDiamond)).queue(targets, values, callDatas, descriptionHash);
 
         vm.warp(block.timestamp + MIN_DELAY + 1);
         vm.roll(block.number + MIN_DELAY + 1);
 
-        auraGovernor.execute(targets, values, callDatas, descriptionHash);
+        GovernanceTimelockFacet(address(auraGovernanceDiamond)).execute(targets, values, callDatas, descriptionHash);
 
         assertEq(auraEngine.getThresholdHealthFactor(), 20);
     }

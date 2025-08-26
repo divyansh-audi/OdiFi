@@ -1,14 +1,38 @@
 // SPDX-License-Identifier: MIT
+
+// Layout of Contract:
+// version
+// imports
+// interfaces, libraries, contracts
+// errors
+// Type declarations
+// State variables
+// Events
+// Modifiers
+// Functions
+
+// Layout of Functions:
+// constructor
+// receive function (if exists)
+// fallback function (if exists)
+// external
+// public
+// internal
+// private
+// view & pure functions
+
 pragma solidity ^0.8.27;
 
 import {LibDiamond} from "./libraries/LibDiamond.sol";
 import {IDiamondCut} from "./interfaces/IDiamondCut.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-// =============================================================================
-// DIAMOND PROXY CONTRACT
-// =============================================================================
-
+/**
+ * @title AuraGovernanceDiamond
+ * @author Divyansh Audichya-->taken from mugden,diamond-hardhat-3
+ * @notice This is the main Diamond Proxy ,which will be going to call the functions in the facets.
+ *  The constructor is setting the contract owner and then adding the `diamondCut` function for the proxy to identify it and call using the ``DiamondCutFacet`` facet.
+ */
 contract AuraGovernanceDiamond {
     constructor(address _contractOwner, address _diamondCutFacet) payable {
         LibDiamond.setContractOwner(_contractOwner);

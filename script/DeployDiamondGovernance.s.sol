@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {Script} from "@forge-std/Script.sol";
+import {Script, console2} from "@forge-std/Script.sol";
 import {TimeLock} from "src/TimeLock.sol";
 import {AuraPowerToken} from "src/AuraPowerToken.sol";
 import {DiamondCutFacet} from "src/facets/DiamondCutFacet.sol";
@@ -131,6 +131,8 @@ contract DeployDiamondGovernance is Script {
         pure
         returns (IDiamondCut.FacetCut[] memory cut)
     {
+        cut = new IDiamondCut.FacetCut[](3);
+        console2.log("In the start of facets");
         bytes4[] memory coreSelectors = new bytes4[](9);
         coreSelectors[0] = GovernanceCoreFacet.initialize.selector;
         coreSelectors[1] = GovernanceCoreFacet.propose.selector;
@@ -141,12 +143,14 @@ contract DeployDiamondGovernance is Script {
         coreSelectors[6] = GovernanceCoreFacet.quorum.selector;
         coreSelectors[7] = GovernanceCoreFacet.hashProposal.selector;
         coreSelectors[8] = GovernanceCoreFacet.getProposal.selector;
+        console2.log("After the 9 fiuunctions of facets");
 
         cut[0] = IDiamondCut.FacetCut({
             facetAddress: addresses.governanceCoreFacet,
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: coreSelectors
         });
+        console2.log("After the first cut of facets");
 
         bytes4[] memory timelockSelectors = new bytes4[](2);
         timelockSelectors[0] = GovernanceTimelockFacet.queue.selector;

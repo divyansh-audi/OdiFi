@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
-// =============================================================================
-// GOVERNANCE SETTINGS FACET
-// =============================================================================
 
 import {LibGovernanceStorage} from "../libraries/LibGovernanceStorage.sol";
 import {LibDiamond} from "../libraries/LibDiamond.sol";
 
+/**
+ * @title GovernanceSettingsFacet
+ * @author Divyansh Audichya
+ * @notice This contract is same as the GovernanceSetting from OpenZeppelin's GovernanceSetting Contract..Almost the same functionlity
+ */
 contract GovernanceSettingsFacet {
     using LibGovernanceStorage for LibGovernanceStorage.GovernanceStorage;
 

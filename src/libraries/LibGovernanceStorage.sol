@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: SMIT
 pragma solidity ^0.8.27;
-// =============================================================================
-// GOVERNANCE STORAGE LIBRARY
-// =============================================================================
 
+/**
+ * @title LibGovernanceStorage
+ * @author Divyansh Audichya
+ * @notice This contract is the storage for the Diamond proxy contract and stores all the structs and mappings
+ */
 library LibGovernanceStorage {
     bytes32 constant GOVERNANCE_STORAGE_POSITION = keccak256("diamond.standard.governance.storage");
 
