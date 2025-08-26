@@ -5,6 +5,7 @@ This project is a very lite version of Aave or Compound ,where you can borrow ,d
 ## WorkFlow
 
 -Stable Coin Implementation
--Chainlink Automation for liquidation
+-Chainlink Automation for liquidation (initially to maintain the protocol's liquidity)
 -Governance Token (ERC-20) and deploying a DAO
 -Airdrop for Early users
+-Diamond Proxy Pattern for DAO
