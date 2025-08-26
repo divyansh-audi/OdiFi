@@ -37,18 +37,19 @@ contract AuraGovernanceTest is Test {
     function setUp() public {
         deploy = new DeployDiamondGovernance();
         (timeLock, auraPowerToken,,,,, auraGovernanceDiamond) = deploy.run();
-
         deployAuraEngine = new DeployAuraEngine();
         (, auraEngine,,) = deployAuraEngine.run();
-        vm.prank(USER);
-        auraPowerToken.delegate(USER);
+        vm.prank(DEFAULT_OWNER);
+        auraPowerToken.delegate(DEFAULT_OWNER);
     }
 
     function testProposalIsGettingCreatedSuccessfully() public {
         vm.startPrank(DEFAULT_OWNER);
         auraPowerToken.mint(USER, AMOUNT_TO_MINT_INITIALLY);
+        auraPowerToken.mint(DEFAULT_OWNER, AMOUNT_TO_MINT_INITIALLY);
         auraEngine.transferOwnership(address(timeLock));
-        uint8 newLiquidationThreshold = 20;
+        uint8 newLiquidationThreshold = 25;
+        // uint8 prevLiquidationThreshold=
         string memory description = "need to change the liquidation threshold";
         bytes memory callData =
             abi.encodeWithSelector(auraEngine.updateTheLiquidationThreshold.selector, newLiquidationThreshold);
@@ -56,6 +57,11 @@ contract AuraGovernanceTest is Test {
         callDatas.push(callData);
         values.push(0);
         vm.stopPrank();
+
+        vm.prank(DEFAULT_OWNER);
+        GovernanceCoreFacet(address(auraGovernanceDiamond)).initialize(
+            address(auraPowerToken), address(timeLock), VOTING_DELAY, VOTING_PERIOD, 0, 0
+        );
 
         uint256 proposalId =
             GovernanceCoreFacet(address(auraGovernanceDiamond)).propose(targets, values, callDatas, description);
@@ -71,6 +77,9 @@ contract AuraGovernanceTest is Test {
         uint8 myVote = 1; // in favor
 
         vm.prank(USER);
+        GovernanceCoreFacet(address(auraGovernanceDiamond)).castVoteWithReason(proposalId, myVote, reason);
+
+        vm.prank(DEFAULT_OWNER);
         GovernanceCoreFacet(address(auraGovernanceDiamond)).castVoteWithReason(proposalId, myVote, reason);
 
         console2.log(
@@ -91,6 +100,6 @@ contract AuraGovernanceTest is Test {
 
         GovernanceTimelockFacet(address(auraGovernanceDiamond)).execute(targets, values, callDatas, descriptionHash);
 
-        assertEq(auraEngine.getThresholdHealthFactor(), 20);
+        assertEq(auraEngine.getThresholdHealthFactor(), 25);
     }
 }

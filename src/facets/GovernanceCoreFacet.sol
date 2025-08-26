@@ -172,7 +172,8 @@ contract GovernanceCoreFacet {
         if (endBlock >= block.number) {
             return ProposalState.Active;
         }
-
+        console2.log("quorum reached:", _quorumReached(proposalId));
+        console2.log("vote succeded:", _voteSucceeded(proposalId));
         if (_quorumReached(proposalId) && _voteSucceeded(proposalId)) {
             return ProposalState.Succeeded;
         } else {
