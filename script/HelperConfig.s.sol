@@ -12,6 +12,10 @@ contract HelperConfig is Script {
         address token;
         address priceFeed;
         address defaultOwner;
+        uint64 subscriptionId;
+        address routerAddress;
+        uint32 callbackGasLimit;
+        bytes32 donId;
     }
 
     address private constant DEFAULT_WALLET = 0x818c95937Cf7254cE5923e4E1dBf2fAF0dDaD06E;
@@ -49,7 +53,11 @@ contract HelperConfig is Script {
         NetworkConfig memory sepoliaConfig = NetworkConfig({
             token: 0xdd13E55209Fd76AfE204dBda4007C227904f0a81,
             priceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
-            defaultOwner: DEFAULT_WALLET
+            defaultOwner: DEFAULT_WALLET,
+            subscriptionId: 5023,
+            routerAddress: 0xb83E47C2bC239B3bf370bc41e1459A34b41238D0,
+            callbackGasLimit: 6000,
+            donId: 0x66756e2d657468657265756d2d7365706f6c69612d3100000000000000000000
         });
 
         return sepoliaConfig;
@@ -64,6 +72,14 @@ contract HelperConfig is Script {
         ERC20Mock weth = new ERC20Mock();
         vm.stopBroadcast();
 
-        return NetworkConfig({token: address(weth), priceFeed: address(ethUsdPriceFeed), defaultOwner: ANVIL_WALLET});
+        return NetworkConfig({
+            token: address(weth),
+            priceFeed: address(ethUsdPriceFeed),
+            defaultOwner: ANVIL_WALLET,
+            subscriptionId: 0,
+            routerAddress: address(0),
+            callbackGasLimit: 6000,
+            donId: bytes32("dummy")
+        });
     }
 }

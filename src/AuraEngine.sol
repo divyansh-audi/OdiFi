@@ -25,13 +25,19 @@ pragma solidity ^0.8.30;
 
 import {AuraCoin} from "src/AuraCoin.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {AggregatorV3Interface} from "@chainlink-brownie/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import {OracleLib} from "./libraries/OracleLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {console2} from "forge-std/console2.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+import {AggregatorV3Interface} from "@chainlink-brownie/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {AutomationCompatibleInterface} from
     "@chainlink-brownie/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import {FunctionsClient} from "@chainlink-brownie/contracts/src/v0.8/functions/v1_0_0/FunctionsClient.sol";
+import {FunctionsRequest} from "@chainlink-brownie/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
+// import {ConfirmedOwner} from "@chainlink-brownie/contracts/src/v0.8/shared/access/ConfirmedOwner.sol";
+
+import {OracleLib} from "./libraries/OracleLib.sol";
+
+import {console2} from "forge-std/console2.sol";
 import {AutomationFund} from "src/AutomationFund.sol";
 // import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
@@ -58,7 +64,7 @@ import {AutomationFund} from "src/AutomationFund.sol";
  *
  * @notice There are some onlyOwner functions which is for governance purpose and the community can propose for the changes ,basically someone will propose a change ,voting will happen and then Governor will tell the Timelock contract to change that thing in this contract ,so after deploying ,the ownership of this should be sent to TimeLock Contract.
  */
-contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
+contract AuraEngine is ReentrancyGuard, FunctionsClient, AutomationCompatibleInterface, Ownable {
     /*///////////////////////////////////////
                    ERRORS
     ///////////////////////////////////////*/
@@ -75,11 +81,14 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
     error AuraEngine__TokenNotAllowedAsCollateral();
     error AuraEngine__TokenAlreadyAllowed();
     error AuraEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
+    error AuraEngine__UnexpectedRequestID(bytes32 requestId);
+    error AuraEngine__ErrorInRequest(bytes err);
 
     /*///////////////////////////////////////
                     TYPES
     ///////////////////////////////////////*/
     using OracleLib for AggregatorV3Interface;
+    using FunctionsRequest for FunctionsRequest.Request;
 
     /*///////////////////////////////////////
                 STATE VARIABLES
@@ -87,6 +96,14 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
 
     AuraCoin private immutable i_auraCoin;
     AutomationFund private immutable i_automationFund;
+    address private i_functionsRouter;
+    uint64 private i_subscriptionId;
+    uint32 private i_callbackGasLimit;
+    bytes32 private i_donId;
+    bytes32 private s_lastRequestId;
+    uint256 public s_latestInrUsdPrice;
+    bytes private s_lastResponse;
+
     address[] private s_collateralTokens;
     address[] private s_usersWithDebt;
 
@@ -101,6 +118,7 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
     mapping(address => uint256) private s_userIndexInDebtArray;
 
     uint8 private constant USD_INR_PRICE = 85; // because of unavailability of inr priice feeds directly ,this will be usd *85--> almost equivalent to INR
+    uint256 private constant INR_USD_PRECISION_FACTOR = 1e8;
     uint8 private THRESHOLD_HEALTH_FACTOR = 20;
     uint8 private constant THRESHOLD_HEALTH_FACTOR_PRECISION = 10;
     uint256 private constant PRECISION_FACTOR = 1e18;
@@ -108,6 +126,9 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
     uint256 private LIQUIDATION_BONUS = 10e18;
     uint256 private constant LIQUIDATION_PRECISION = 100e18;
     uint256 private constant MIN_HEALTH_FACTOR = 1e18;
+
+    string private constant JAVASCRIPT_PRICEFEED_CODE =
+        'const apiUrls = ["https://api.exchangerate-api.com/v4/latest/USD","https://open.er-api.com/v6/latest/USD",];const requests = apiUrls.map(url => Functions.makeHttpRequest({ url }));const responses = await Promise.all(requests);const rates = [];responses.forEach(response => {if (!response.error) {rates.push(response.data.rates.INR);}});if (rates.length === 0) {throw new Error("Failed to fetch any rates.");}const averageRate = rates.reduce((a, b) => a + b, 0) / rates.length;return Functions.encodeUint256(Math.round(averageRate * 10**8));';
 
     /*///////////////////////////////////////
                      EVENTS
@@ -120,6 +141,7 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
         address indexed user, address to, address indexed collateralToken, uint256 indexed amountRedeemed
     );
     event UserAddedInDebtArrayAndMapping(address indexed user, uint256 indexed amount);
+    event Response(bytes32 indexed requestId, bytes indexed lastResponse);
 
     /*///////////////////////////////////////
                    MODIFIER
@@ -147,8 +169,12 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
         address[] memory priceFeedAddress,
         AuraCoin auraCoin,
         address owner,
-        AutomationFund automationFund
-    ) Ownable(owner) {
+        AutomationFund automationFund,
+        uint64 subscriptionId,
+        address router,
+        uint32 callbackGasLimit,
+        bytes32 donId
+    ) FunctionsClient(router) Ownable(owner) {
         if (tokenAddress.length != priceFeedAddress.length) {
             revert AuraEngine__TokenAddressAndPriceFeedAddressesMustBeSameLength();
         }
@@ -159,6 +185,10 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
         }
         i_auraCoin = auraCoin;
         i_automationFund = automationFund;
+        i_subscriptionId = subscriptionId;
+        i_functionsRouter = router;
+        i_donId = donId;
+        i_callbackGasLimit = callbackGasLimit;
         // i_wethAddress = weth;
         // i_ethUSDPriceFeed = ethUSDPriceFeed;
         // i_timeLockContract = timeLockContractAddress;
@@ -319,6 +349,23 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
         }
     }
 
+    /**
+     *
+     * @param requestId request id which was generated when the dao called `requestInrUsdPriceFeed`
+     * @param response response given by the don
+     * @param err Error if occured
+     */
+    function fulfillRequest(bytes32 requestId, bytes memory response, bytes memory err) internal override {
+        if (s_lastRequestId != requestId) {
+            revert AuraEngine__UnexpectedRequestID(requestId); // Check if request IDs match
+        }
+        if (err.length != 0) {
+            revert AuraEngine__ErrorInRequest(err);
+        }
+        s_latestInrUsdPrice = abi.decode(response, (uint256));
+        emit Response(requestId, s_lastResponse);
+    }
+
     /*///////////////////////////////////////
               INTERNAL FUNCTIONS
     ///////////////////////////////////////*/
@@ -408,6 +455,7 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
             revert AuraEngine__HealthFactorBroken();
         }
     }
+
     /*///////////////////////////////////////
               GETTER FUNCTIONS
     ///////////////////////////////////////*/
@@ -469,8 +517,13 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
         }
         AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddress);
         (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
+        uint256 adjustedPrice;
         // Assumes price feed is USD based with 8 decimals, common for Chainlink
-        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE;
+        if (block.chainid == 31337) {
+            adjustedPrice = (uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE);
+        } else {
+            adjustedPrice = (uint256(price) * PRECISION_PRICE_FEED * s_latestInrUsdPrice) / INR_USD_PRECISION_FACTOR;
+        }
         return (adjustedPrice * _amount) / PRECISION_FACTOR;
     }
 
@@ -485,7 +538,12 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
         }
         AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddress);
         (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
-        uint256 adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE;
+        uint256 adjustedPrice;
+        if (block.chainid == 31337) {
+            adjustedPrice = uint256(price) * PRECISION_PRICE_FEED * USD_INR_PRICE;
+        } else {
+            adjustedPrice = (uint256(price) * PRECISION_PRICE_FEED * s_latestInrUsdPrice) / INR_USD_PRECISION_FACTOR;
+        }
         return (_amountInINR * PRECISION_FACTOR) / adjustedPrice;
     }
 
@@ -563,5 +621,17 @@ contract AuraEngine is ReentrancyGuard, Ownable, AutomationCompatibleInterface {
             revert AuraEngine__OverCollateralizationNotValid();
         }
         THRESHOLD_HEALTH_FACTOR = _newOvercollateralizedPercent;
+    }
+
+    /**
+     * @dev Will be called by the dao only when really necessary
+     */
+    function requestInrUsdUpdate() external onlyOwner {
+        s_lastRequestId = _sendRequest(
+            bytes(JAVASCRIPT_PRICEFEED_CODE),
+            i_subscriptionId,
+            i_callbackGasLimit, // gas limit
+            i_donId // don ID
+        );
     }
 }

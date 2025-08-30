@@ -98,6 +98,7 @@ contract AuraGovernanceTest is Test {
         vm.warp(block.timestamp + MIN_DELAY + 1);
         vm.roll(block.number + MIN_DELAY + 1);
 
+        vm.prank(address(timeLock));
         GovernanceTimelockFacet(address(auraGovernanceDiamond)).execute(targets, values, callDatas, descriptionHash);
 
         assertEq(auraEngine.getThresholdHealthFactor(), 25);

@@ -35,7 +35,7 @@ contract AuraEngineTest is Test {
     function setUp() public {
         deploy = new DeployAuraEngine();
         (auraCoin, auraEngine, config, automationFund) = deploy.run();
-        (weth, ethUSDPriceFeed, defaultOwner) = config.activeNetworkConfig();
+        (weth, ethUSDPriceFeed, defaultOwner,,,,) = config.activeNetworkConfig();
         ERC20Mock(weth).mint(USER, INITIAL_WETH_BALANCE);
         ERC20Mock(weth).mint(ALICE, INITIAL_WETH_BALANCE);
         ERC20Mock(weth).mint(DEFAULT_OWNER, INITIAL_WETH_BALANCE);

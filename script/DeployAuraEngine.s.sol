@@ -26,7 +26,17 @@ contract DeployAuraEngine is Script {
         auraCoin = new AuraCoin();
         automationFund = new AutomationFund();
         auraCoin.mint(address(automationFund), INITIAL_FUNDING_TO_AUTOMATION_FUND);
-        auraEngine = new AuraEngine(tokenAddresses, priceFeedAddresses, auraCoin, config.defaultOwner, automationFund);
+        auraEngine = new AuraEngine(
+            tokenAddresses,
+            priceFeedAddresses,
+            auraCoin,
+            config.defaultOwner,
+            automationFund,
+            config.subscriptionId,
+            config.routerAddress,
+            config.callbackGasLimit,
+            config.donId
+        );
         auraCoin.transferOwnership(address(auraEngine));
         vm.stopBroadcast();
 
