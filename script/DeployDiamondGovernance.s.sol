@@ -59,11 +59,12 @@ contract DeployDiamondGovernance is Script {
         HelperConfig helperConfig = new HelperConfig();
         HelperConfig.NetworkConfig memory config = helperConfig.getConfig();
         vm.startBroadcast(config.defaultOwner);
-        auraPowerToken = new AuraPowerToken();
-        addresses.governanceToken = address(auraPowerToken);
 
         timeLock = new TimeLock(MIN_DELAY, proposers, executors);
         addresses.timelock = address(timeLock);
+
+        auraPowerToken = new AuraPowerToken(config.defaultOwner);
+        addresses.governanceToken = address(auraPowerToken);
 
         diamondCutFacet = new DiamondCutFacet();
         addresses.diamondCutFacet = address(diamondCutFacet);
