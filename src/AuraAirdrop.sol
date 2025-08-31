@@ -129,7 +129,7 @@ contract AuraAirdrop is EIP712 {
     }
 
     /**
-     * @notice This function returns the digesct which is hashStruct(message) which means:-
+     * @notice This function returns the digest which is hashStruct(message) which means:-
      * hashStruct(message)-> keccack256(typeHash || structData)),which can be futher be like :-
      * hashStruct(message)->keccack256(encode(MESSAGE_TYPEHASH,AirdropClaim({account;account,amount:amount}));
      * @param _account account to send the token
